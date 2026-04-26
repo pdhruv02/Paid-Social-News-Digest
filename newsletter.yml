@@ -1,0 +1,34 @@
+name: Paid Social Edge — Weekly Newsletter
+
+on:
+  schedule:
+    # Tuesday 11:00 UTC = Tuesday 6:00 AM CDT (UTC-5, Apr–Nov)
+    # Adjust to 12:00 UTC in winter when CST (UTC-6) is in effect
+    - cron: '0 11 * * 2'
+
+  # Lets you trigger a test send manually from the GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  send-newsletter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install anthropic resend pytz
+
+      - name: Run newsletter script
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RESEND_API_KEY:    ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL:        ${{ secrets.FROM_EMAIL }}
+        run: python newsletter.py
