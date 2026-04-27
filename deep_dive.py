@@ -162,9 +162,9 @@ TOPICS = [
 def get_topic_for_cycle() -> dict:
     # Rotate by week number — new topic every odd week
     week = datetime.now(CST).isocalendar()[1]
-    if week % 2 == 0:
-        print(f"Week {week} is even — skipping. Deep dive runs on odd weeks only.")
-        exit(0)
+  # if week % 2 == 0:
+    #    print(f"Week {week} is even — skipping. Deep dive runs on odd weeks only.")
+     #   exit(0)
     cycle = (week // 2) % len(TOPICS)
     return TOPICS[cycle]
 
