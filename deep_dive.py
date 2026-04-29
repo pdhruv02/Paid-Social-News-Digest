@@ -1,471 +1,780 @@
 """
-Biweekly Operator Deep Dive — Paid Social Edge
+Paid Social Edge — Evidence-Led Research Issue
 Runs on odd ISO weeks, Tuesday 6 AM CST
 
-Phase 1: Broad landscape scan across quality sources
-Phase 2: AI selects best topic based on what material actually exists
-Phase 3: Targeted deep research on that topic
-Phase 4: Compile into operator-grade learning memo
+What this script does differently:
+Phase 1: AI generates diverse discovery queries for this run
+Phase 2: Tavily searches broadly across evidence types
+Phase 3: AI decides what the issue should be based on what was actually found
+Phase 4: Tavily performs targeted follow-up research
+Phase 5: AI writes a flexible, operator-grade issue
+Phase 6: Email is sent via Resend
+
+No memory file.
+No fixed topic candidates.
+No forced case studies.
+No rigid topic rotation.
 """
 
 from tavily import TavilyClient
 from groq import Groq
 import resend
-import json, os, re, time
+import json
+import os
+import re
+import time
+import html as html_lib
 from datetime import datetime
 import pytz
 
+
 # ── Config ────────────────────────────────────────────────────────────────────
+
 TAVILY_API_KEY   = os.environ["TAVILY_API_KEY"]
 GROQ_API_KEY     = os.environ["GROQ_API_KEY"]
 RESEND_API_KEY   = os.environ["RESEND_API_KEY"]
 FROM_EMAIL       = os.environ["FROM_EMAIL"]
+
 FROM_NAME        = "Paid Social Edge"
 SUBSCRIBERS_FILE = "subscribers.json"
-MODEL            = "llama-3.3-70b-versatile"
+MODEL            = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 CST              = pytz.timezone("US/Central")
 
-# ── Week gate: odd weeks only ─────────────────────────────────────────────────
+
+# ── Optional week gate: odd weeks only ─────────────────────────────────────────
+
 def check_week():
+    """
+    Keeps this as a biweekly run using odd ISO weeks.
+    If your scheduler already controls cadence, you can comment out check_week()
+    inside main().
+    """
     week = datetime.now(CST).isocalendar()[1]
    # if week % 2 == 0:
-    #    print(f"Week {week} is even — deep dive skips. Brief runs this week.")
-     #   exit(0)
-    print(f"Week {week} (odd) — running deep dive.")
-
-# ── Possible topics ───────────────────────────────────────────────────────────
-# These are candidates, not a rotation schedule.
-# The AI picks whichever one has the strongest available material this cycle.
-TOPIC_CANDIDATES = """
-- Meta automation and where human edge remains (Advantage+, ASC, automated bidding)
-- LinkedIn Ads for B2B demand generation (targeting, lead quality, pipeline influence)
-- Reddit as a B2B research and trust channel (organic influence, paid, community strategy)
-- Paid social creative testing systems (hypothesis-driven testing, velocity, signals vs noise)
-- Lead quality vs lead volume in B2B paid social (CPL vs pipeline, downstream conversion)
-- Incrementality and attribution for paid social (geo holdout, lift studies, true ROAS)
-- MMM for paid social teams (media mix modeling, budget allocation, cross-channel)
-- ABM paid social sequencing (account-based, LinkedIn + Meta coordination, pipeline)
-- In-house media buying operating models (Fortune 500 in-house, structure, what to keep vs outsource)
-- AI creative workflows in paid social (production, iteration, testing, personalization)
-- Competitor paid social teardown: Dell vs HP vs Lenovo vs Apple vs Microsoft
-- How enterprise buyers research technology purchases (B2B buyer journey, digital touchpoints)
-- Upper-funnel paid social measurement (brand lift, search lift, awareness attribution)
-- Creative fatigue and testing velocity (refresh cadence, fatigue signals, testing backlog)
-- Building a paid social testing roadmap (prioritization, structure, hypothesis bank)
-- AI PC messaging and competitive positioning (Dell XPS/Inspiron AI PCs vs competition)
-- Gaming paid social creative strategy (Alienware, gaming audience, platform mix)
-- Landing page and offer strategy for paid social (post-click experience, conversion, B2B offers)
-"""
-
-# ── Phase 1: Landscape scan queries ──────────────────────────────────────────
-# Cast wide across high-quality sources — let the material tell us what's strong
-LANDSCAPE_QUERIES = [
-    "LinkedIn B2B Institute WARC Effie paid social case study effectiveness 2023 2024 2025",
-    "Think with Google IPA paid social B2B case study results",
-    "Meta LinkedIn Reddit paid social B2B enterprise case study 2024 2025",
-    "AdExchanger Digiday Marketing Brew paid social strategy research 2024 2025",
-    "Dell HP Lenovo Apple enterprise technology advertising campaign 2024 2025",
-    "paid social measurement incrementality attribution research 2024 2025",
-    "B2B buyer behavior enterprise technology digital paid media 2024 2025",
-    "paid social creative testing brand campaign results data 2024 2025",
-]
-
-# ── Phase 1 prompt: topic selection ──────────────────────────────────────────
-TOPIC_SELECTION_PROMPT = """Today is {today}.
-
-You are deciding what topic to deep-dive on this week for a biweekly operator memo focused on Dell's paid social team.
-
-Context: You work on Dell's in-house paid social team. Dell sells enterprise B2B IT solutions, consumer laptops/PCs, and gaming products (Alienware). Main competitors: HP, Lenovo, Apple, Microsoft.
-
-Below are raw search results from a broad scan across paid social case study sources, research databases, and industry publications.
-
-RAW LANDSCAPE RESULTS:
-{landscape_results}
-
-CANDIDATE TOPICS (these are possibilities, not a mandatory list — you can also pick a related topic if the material strongly suggests something else):
-{topics}
-
-YOUR TASK:
-Based purely on what material actually exists in these results, select the ONE topic that:
-1. Has the strongest available material (real case studies, research reports, or practitioner examples — not just opinion)
-2. Is most useful for Dell paid social right now
-3. Has enough substance for a meaningful 8–12 minute learning memo
-
-Do NOT pick a topic just because it sounds good. Pick based on what the material supports.
-If the results are thin overall, pick the topic with even modest quality material over one with nothing.
-
-Return ONLY valid JSON. No markdown, no preamble.
-
-{{
-  "selected_topic": "exact topic name",
-  "selection_rationale": "1–2 sentences on why this topic has the strongest material available right now",
-  "focus_angle": "The specific angle or question to focus on — more specific than just the topic name",
-  "suggested_search_queries": [
-    "5–7 targeted search queries to find the best material on this specific topic",
-    "Mix of: source-specific queries (WARC, Effie, LinkedIn B2B Institute, Think with Google), case study queries, competitor queries, practitioner queries",
-    "query 3", "query 4", "query 5", "query 6", "query 7"
-  ]
-}}"""
-
-# ── Phase 3 prompt: compile deep dive ────────────────────────────────────────
-DEEP_DIVE_PROMPT = """Today is {today}.
-
-You are writing a biweekly operator deep dive for yourself — a senior paid social practitioner on Dell's in-house team.
-
-Dell context:
-- Sells enterprise B2B (servers, storage, IT solutions), consumer laptops/PCs (XPS, Inspiron, Latitude), and gaming (Alienware)
-- Competes with HP, Lenovo, Apple, Microsoft
-- In-house model — you care about what makes internal teams sharper
-- B2B has long purchase cycles, multiple stakeholders, LinkedIn + Reddit + search heavy
-- Consumer and gaming are more direct-response, Meta + YouTube + TikTok heavy
-
-This edition topic: {topic}
-Focus angle: {focus_angle}
-
-RAW RESEARCH RESULTS (from targeted sources):
-{deep_results}
-
-ALSO AVAILABLE — landscape scan results from earlier:
-{landscape_results}
-
-YOUR TASK:
-Write a practical operator deep dive. This is not a news brief. It is a learning document.
-Your goal: help build genuine paid social judgment on this topic.
-
-RESEARCH WINDOW GUIDANCE (apply per source type):
-- Tactical paid social material: prefer last 3 years
-- Platform case studies: prefer last 3 years
-- Marketing effectiveness cases (WARC, Effie, IPA): last 5–10 years allowed if still relevant — explain why
-- Research reports: last 3–5 years
-- Practitioner teardowns: last 3 years preferred
-- Competitor examples: current or recently visible
-
-SOURCE QUALITY RULES:
-- Prioritize: original research, effectiveness databases (WARC/Effie/IPA), LinkedIn B2B Institute, Think with Google, IAB reports, strong practitioner teardowns, competitor examples
-- Be careful with: platform promotional case studies (useful for ideas, not as proof), generic thought leadership, SEO blogs, unsupported claims
-- Mark paywalled sources clearly as [PAYWALLED]
-- If a source is only partially accessible, say so — do not pretend to have read the full piece
-- If material is thin on a subtopic, say so. Do not invent or pad.
-
-OUTPUT: Return ONLY valid JSON. No markdown fences, no preamble, no explanation.
-
-{{
-  "topic": "{topic}",
-  "focus_angle": "{focus_angle}",
-  "why_it_matters_for_dell": "2–3 sentences. Specific to Dell — B2B, consumer, gaming, measurement, competitive, or operational angle. Not generic.",
-  "best_materials": [
-    {{
-      "title": "Title",
-      "source": "Publication or platform",
-      "date": "Date or recency (e.g. 2024, Q1 2025, Last 3 years)",
-      "url": "URL",
-      "type": "Research | Case Study | Platform Source | Practitioner Teardown | Competitor Example",
-      "paywalled": false,
-      "why_worth_reading": "One sentence on what makes this worth reading."
-    }}
-  ],
-  "key_lessons": [
-    "Actual insight — something that changes how you think or act. Not a summary.",
-    "Lesson 2",
-    "Lesson 3",
-    "Lesson 4",
-    "Lesson 5"
-  ],
-  "case_examples": [
-    {{
-      "brand": "Brand name",
-      "what_they_did": "Specific — what format, targeting approach, structure, measurement, or creative architecture they used.",
-      "useful_lesson": "The transferable insight. What does this reveal about how paid social actually works?",
-      "dell_application": "How this could apply specifically to Dell — which segment, which platform, which use case."
-    }}
-  ],
-  "dell_application": {{
-    "b2b": "Only include if there is a real connection. How this applies to Dell enterprise/B2B paid social.",
-    "consumer": "Only if real connection. Dell.com / consumer campaigns.",
-    "gaming": "Only if real connection. Alienware / gaming.",
-    "measurement": "Only if real connection. Measurement, attribution, or signal quality angle.",
-    "creative_testing": "Only if real connection. Creative testing or format strategy.",
-    "in_house_ops": "Only if real connection. In-house team operations or capability building."
-  }},
-  "playbook": {{
-    "what_to_test": ["Specific test idea 1", "Specific test idea 2", "Specific test idea 3"],
-    "what_to_measure": ["Specific metric or signal 1", "Metric 2"],
-    "what_to_avoid": ["Specific pitfall 1", "Pitfall 2"]
-  }},
-  "internal_asset_idea": "One specific asset to build from this learning. Be concrete: what it would contain, what format, who would use it.",
-  "personal_skill_takeaway": "One thing to practice, read, or learn next to compound on this topic."
-}}"""
+      #  print(f"Week {week} is even — skipping this biweekly run.")
+      #  exit(0)
+    print(f"Week {week} is odd — running Paid Social Edge issue.")
 
 
-# ── Research helpers ──────────────────────────────────────────────────────────
-def search_batch(queries: list, max_results: int = 5, label: str = "") -> str:
-    tavily  = TavilyClient(api_key=TAVILY_API_KEY)
-    results = []
-    for i, q in enumerate(queries, 1):
-        tag = f"[{label} {i}/{len(queries)}]" if label else f"[{i}/{len(queries)}]"
-        print(f"  {tag} {q[:65]}...")
-        try:
-            r = tavily.search(q, search_depth="advanced", max_results=max_results,
-                              include_raw_content=False)
-            for item in r.get("results", []):
-                results.append(
-                    f"TITLE: {item.get('title','')}\n"
-                    f"URL:   {item.get('url','')}\n"
-                    f"DATE:  {item.get('published_date','unknown')}\n"
-                    f"BODY:  {item.get('content','')[:350]}\n---"
-                )
-            time.sleep(0.4)
-        except Exception as e:
-            print(f"    Search error: {e}")
-    return "\n\n".join(results)
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def esc(value) -> str:
+    """Escape text for safe email HTML."""
+    if value is None:
+        return ""
+    return html_lib.escape(str(value), quote=True)
 
 
-def call_groq(prompt: str, max_tokens: int = 1500) -> dict:
+def clean_url(url: str) -> str:
+    if not url:
+        return "#"
+    return str(url).strip()
+
+
+def safe_list(value):
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return []
+    return [str(value)]
+
+
+def compact_text(text: str, max_chars: int) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"\s+", " ", str(text)).strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rsplit(" ", 1)[0] + "..."
+
+
+def extract_json(raw: str) -> dict:
+    """
+    Extract JSON object from model output.
+    Handles accidental markdown fences or small preambles.
+    """
+    clean = re.sub(r"```(?:json)?|```", "", raw or "").strip()
+
+    # Prefer first full JSON object.
+    match = re.search(r"\{.*\}", clean, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON object found in model output:\n{raw[:800]}")
+
+    return json.loads(match.group())
+
+
+def call_groq(prompt: str, max_tokens: int = 1800, temperature: float = 0.25) -> dict:
     groq_client = Groq(api_key=GROQ_API_KEY)
+
     for attempt in range(3):
         try:
             if attempt > 0:
-                print(f"  Retry {attempt}/2 after rate limit pause...")
-                time.sleep(15 * attempt)
-            resp  = groq_client.chat.completions.create(
+                wait = 15 * attempt
+                print(f"  Retry {attempt}/2 after {wait}s pause...")
+                time.sleep(wait)
+
+            resp = groq_client.chat.completions.create(
                 model=MODEL,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
+                temperature=temperature,
                 max_tokens=max_tokens,
             )
-            raw   = resp.choices[0].message.content
-            clean = re.sub(r"```(?:json)?|```", "", raw).strip()
-            # Find the outermost JSON object
-            m = re.search(r"\{.*\}", clean, re.DOTALL)
-            if not m:
-                raise ValueError(f"No JSON found. Raw output:\n{raw[:400]}")
-            return json.loads(m.group())
+
+            raw = resp.choices[0].message.content
+            return extract_json(raw)
+
         except json.JSONDecodeError as e:
-            print(f"  JSON parse error (attempt {attempt+1}): {e}")
+            print(f"  JSON parse error attempt {attempt + 1}: {e}")
             if attempt == 2:
                 raise
+
         except Exception as e:
-            if "rate_limit" in str(e).lower() or "429" in str(e):
-                print(f"  Rate limit hit — waiting before retry...")
+            err = str(e).lower()
+            if "rate_limit" in err or "429" in err:
+                print("  Rate limit hit — retrying after pause...")
                 continue
             raise
-    raise RuntimeError("Groq call failed after 3 attempts")
+
+    raise RuntimeError("Groq call failed after 3 attempts.")
+
+
+# ── Prompts ───────────────────────────────────────────────────────────────────
+
+def build_discovery_query_prompt(today: str) -> str:
+    return f"""
+Today is {today}.
+
+You are creating search queries for a paid social research automation.
+
+The reader works on Dell's in-house paid social team.
+
+Dell context:
+- Dell sells enterprise B2B IT solutions, servers, storage, consumer PCs/laptops, and Alienware gaming products.
+- Competitors include HP, Lenovo, Apple, Microsoft, NVIDIA ecosystem companies, and other enterprise/consumer tech brands.
+- The reader cares about paid social strategy, creative testing, measurement, attribution, platform automation, B2B buyer behavior, competitor messaging, AI workflows, and in-house media operations.
+
+Your job:
+Generate broad, diverse discovery queries for this run.
+
+Important:
+Do NOT generate queries from a fixed syllabus.
+Do NOT only search for case studies.
+Do NOT only search for LinkedIn or B2B.
+Do NOT make every query about Dell.
+Do NOT assume what the issue will be about.
+
+The goal is to discover what is worth writing about this time.
+
+Cover different evidence types:
+- Platform changes
+- AI and automation in advertising
+- Competitor activity and messaging
+- Case studies or campaign examples
+- Research reports
+- Practitioner/operator teardowns
+- Buyer behavior
+- Measurement and attribution
+- Creative strategy
+- In-house media or operating model shifts
+
+Use a mix of recent and evergreen-oriented queries.
+Some queries should look for recent developments.
+Some should look for strong case studies or research from the last few years.
+
+Return ONLY valid JSON.
+
+{{
+  "queries": [
+    "query 1",
+    "query 2",
+    "query 3",
+    "query 4",
+    "query 5",
+    "query 6",
+    "query 7",
+    "query 8",
+    "query 9",
+    "query 10"
+  ]
+}}
+"""
+
+
+def build_issue_selection_prompt(today: str, landscape_results: str) -> str:
+    return f"""
+Today is {today}.
+
+You are not choosing from a fixed topic list.
+
+You are acting as a paid social research editor for someone on Dell's in-house paid social team.
+
+The goal is not to create a generic newsletter.
+The goal is to discover the most useful paid social learning opportunity from this research run.
+
+Dell context:
+- Dell sells enterprise B2B IT solutions, consumer PCs/laptops, and Alienware gaming products.
+- Dell competes with HP, Lenovo, Apple, Microsoft, NVIDIA ecosystem companies, and other enterprise/consumer tech brands.
+- The reader works in paid social and cares about creative, measurement, platform automation, competitor positioning, B2B buyer behavior, campaign testing, and in-house media operations.
+
+Raw research results:
+{landscape_results}
+
+Your task:
+Look across the raw results and decide what this issue should actually be about.
+
+Do NOT force a topic.
+Do NOT pick the broadest or most obvious theme.
+Do NOT choose something just because there is a lot of material on it.
+Do NOT write about a generic evergreen topic unless the sources found in this run reveal a useful angle.
+Do NOT force a case study.
+Do NOT force a platform update.
+Do NOT force Dell relevance if the connection is weak.
+
+Instead, identify the strongest research opportunity from this specific run.
+
+A strong opportunity may come from:
+- A meaningful platform change
+- A strong case study
+- A competitor messaging pattern
+- A new research report
+- A practitioner teardown
+- A buyer behavior insight
+- A measurement or attribution warning
+- A creative testing lesson
+- An AI/automation shift
+- A surprising connection across multiple sources
+- A useful warning about an overhyped idea
+
+Ask yourself:
+1. What would be genuinely useful for a Dell paid social operator?
+2. What feels specific to the sources found this time?
+3. What is not just a generic topic anyone could write about?
+4. What would make the reader think differently, test differently, measure differently, or explain something better?
+5. What would be worth reading even if the reader is busy?
+
+Choose the issue shape based on the evidence.
+
+Possible issue shapes:
+- Signal Brief
+- Case Teardown
+- Competitor Watch
+- Research Breakdown
+- Operator Lesson
+- Platform Shift Memo
+- Measurement Warning
+- Creative Swipe File
+- Buyer Behavior Note
+- In-House Ops Memo
+
+These are not mandatory categories. Use a different shape if the evidence calls for it.
+
+If the raw results are weak:
+- Do not pretend there is a major insight.
+- Choose a smaller but useful angle.
+- Clearly say the evidence is thin.
+
+Return ONLY valid JSON.
+
+{{
+  "issue_shape": "The format this issue should take",
+  "issue_title": "Specific title, not a broad generic topic",
+  "core_angle": "The sharp question or learning this issue should focus on",
+  "why_this_issue": "Why this is the most useful opportunity from this research run",
+  "what_not_to_do": "What obvious or generic angle you are intentionally avoiding",
+  "evidence_to_use": [
+    {{
+      "title": "Source title",
+      "source": "Source name",
+      "url": "URL",
+      "date_or_recency": "Date or recency",
+      "why_it_matters": "Why this source supports the issue"
+    }}
+  ],
+  "targeted_search_queries": [
+    "5 to 8 follow-up queries to deepen this exact issue angle"
+  ]
+}}
+"""
+
+
+def build_issue_writer_prompt(
+    today: str,
+    issue_shape: str,
+    issue_title: str,
+    core_angle: str,
+    why_this_issue: str,
+    what_not_to_do: str,
+    deep_results: str,
+    landscape_results: str
+) -> str:
+    return f"""
+Today is {today}.
+
+You are writing a paid social research issue for someone on Dell's in-house paid social team.
+
+This is not a generic newsletter.
+This is not a fixed-format deep dive.
+This issue should follow the evidence and the selected issue shape.
+
+Issue shape:
+{issue_shape}
+
+Issue title:
+{issue_title}
+
+Core angle:
+{core_angle}
+
+Why this issue was selected:
+{why_this_issue}
+
+Obvious/generic angle to avoid:
+{what_not_to_do}
+
+Raw targeted research:
+{deep_results}
+
+Earlier landscape results:
+{landscape_results}
+
+Dell context:
+- Dell sells enterprise B2B IT solutions, servers, storage, consumer PCs/laptops, and Alienware gaming products.
+- Competitors include HP, Lenovo, Apple, Microsoft, NVIDIA ecosystem companies, and other enterprise/consumer tech brands.
+- The reader works on paid social and cares about campaign decisions, creative testing, measurement quality, buyer behavior, platform automation, and in-house team capability.
+
+Your goal:
+Write a useful, sharp, operator-grade research issue.
+
+The output should help the reader do at least one of these:
+- Think better about paid social strategy
+- Test better creative
+- Understand platform changes
+- Improve measurement judgment
+- Understand buyers better
+- Spot competitor patterns
+- Build a useful internal asset
+- Make better paid social decisions at Dell
+
+Rules:
+- Do not force sections that do not fit.
+- Do not force case studies if the case material is weak.
+- Do not force Dell B2B, consumer, gaming, measurement, creative, and ops sections if only some are relevant.
+- Do not summarize every source one by one unless that is useful.
+- Do not overstate platform promotional case studies.
+- Mark paywalled or partially accessible sources clearly.
+- If evidence is thin, say so.
+- Prefer sharp judgment over completeness.
+- Be specific and practical.
+- Avoid generic marketing language.
+
+Return ONLY valid JSON.
+
+{{
+  "issue_shape": "{issue_shape}",
+  "title": "{issue_title}",
+  "core_angle": "{core_angle}",
+  "opening": "Short 2-3 sentence setup explaining why this matters.",
+  "main_takeaway": "The one big idea the reader should remember.",
+  "what_was_found": [
+    {{
+      "source": "Source name",
+      "date_or_recency": "Date or recency",
+      "url": "URL",
+      "finding": "What was found",
+      "why_it_matters": "Why this matters for paid social"
+    }}
+  ],
+  "operator_lessons": [
+    "Practical lesson 1",
+    "Practical lesson 2",
+    "Practical lesson 3"
+  ],
+  "dell_application": "Specific application to Dell. Keep this practical and only include real connections.",
+  "what_to_test_or_monitor": [
+    "Specific test, question, or monitoring idea 1",
+    "Specific test, question, or monitoring idea 2"
+  ],
+  "what_not_to_overlearn": [
+    "Caveat or limitation 1",
+    "Caveat or limitation 2"
+  ],
+  "internal_asset_idea": "One useful internal asset this could become, if applicable.",
+  "best_links": [
+    {{
+      "title": "Title",
+      "url": "URL"
+    }}
+  ],
+  "subject_line": "Email subject line under 70 characters"
+}}
+"""
+
+
+# ── Research functions ────────────────────────────────────────────────────────
+
+def search_batch(queries: list, max_results: int = 5, label: str = "") -> str:
+    tavily = TavilyClient(api_key=TAVILY_API_KEY)
+    seen_urls = set()
+    results = []
+
+    for i, q in enumerate(queries, 1):
+        q = str(q).strip()
+        if not q:
+            continue
+
+        tag = f"[{label} {i}/{len(queries)}]" if label else f"[{i}/{len(queries)}]"
+        print(f"  {tag} {q[:90]}...")
+
+        try:
+            response = tavily.search(
+                q,
+                search_depth="advanced",
+                max_results=max_results,
+                include_raw_content=False
+            )
+
+            for item in response.get("results", []):
+                url = item.get("url", "").strip()
+                if not url or url in seen_urls:
+                    continue
+
+                seen_urls.add(url)
+
+                title = item.get("title", "")
+                published_date = item.get("published_date", "unknown")
+                content = item.get("content", "")
+
+                results.append(
+                    f"QUERY: {q}\n"
+                    f"TITLE: {title}\n"
+                    f"URL: {url}\n"
+                    f"DATE: {published_date}\n"
+                    f"BODY: {compact_text(content, 650)}\n"
+                    f"---"
+                )
+
+            time.sleep(0.4)
+
+        except Exception as e:
+            print(f"    Search error: {e}")
+
+    return "\n\n".join(results)
+
+
+def fallback_discovery_queries() -> list:
+    return [
+        "latest paid social advertising platform updates Meta LinkedIn Reddit TikTok Google Ads",
+        "AI automation advertising paid social campaign management creative optimization",
+        "paid social measurement attribution incrementality MMM research report",
+        "B2B buyer behavior enterprise technology marketing research report",
+        "paid social creative testing case study campaign teardown",
+        "Dell HP Lenovo Apple Microsoft AI PC advertising campaign messaging",
+        "LinkedIn Ads Reddit Ads Meta Ads B2B case study campaign results",
+        "AdExchanger Digiday Marketing Brew paid social AI advertising automation",
+        "Think with Google IAB WARC Effie advertising effectiveness case study digital media",
+        "paid social practitioner teardown LinkedIn Meta Reddit creative measurement"
+    ]
 
 
 # ── Email HTML ────────────────────────────────────────────────────────────────
-TYPE_COLORS = {
-    "Research":              "#059669",
-    "Case Study":            "#7C3AED",
-    "Platform Source":       "#1877F2",
-    "Practitioner Teardown": "#D97706",
-    "Competitor Example":    "#DC2626",
-}
+
+def bullet_list(items: list, color: str = "#374151") -> str:
+    items = [i for i in safe_list(items) if str(i).strip()]
+    if not items:
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No strong points included this cycle.</p>'
+
+    return (
+        "<ul style='margin:0;padding-left:18px;'>"
+        + "".join(
+            f'<li style="margin-bottom:8px;font-size:13.5px;color:{color};line-height:1.7;">{esc(i)}</li>'
+            for i in items
+        )
+        + "</ul>"
+    )
 
 
-def material_row(m: dict) -> str:
-    typ   = m.get("type", "Source")
-    color = TYPE_COLORS.get(typ, "#4B5563")
-    pw    = " 🔒 PAYWALLED" if m.get("paywalled") else ""
+def section(label: str, content: str, bg: str = "#FFFFFF") -> str:
     return f"""
-<tr><td style="padding:11px 0;border-bottom:1px solid #F3F4F6;">
-  <table width="100%" cellpadding="0" cellspacing="0"><tr>
-    <td><span style="background:{color};color:#fff;font-size:10px;font-weight:700;
-                 padding:2px 9px;border-radius:12px;text-transform:uppercase;">{typ}</span>
-        <span style="font-size:11px;color:#9CA3AF;margin-left:8px;">{m.get('date','')}{pw}</span>
-    </td>
-  </tr></table>
-  <p style="margin:5px 0 2px;font-size:13.5px;font-weight:600;color:#111827;">
-    <a href="{m.get('url','#')}" style="color:#111827;text-decoration:none;">{m.get('title','')}</a>
-    <span style="font-weight:400;color:#6B7280;"> — {m.get('source','')}</span>
-  </p>
-  <p style="margin:0;font-size:12.5px;color:#6B7280;line-height:1.6;">{m.get('why_worth_reading','')}</p>
-</td></tr>"""
+<tr>
+  <td style="background:{bg};padding:22px 26px;border-bottom:1px solid #F3F4F6;">
+    <p style="margin:0 0 12px;font-size:10.5px;font-weight:800;color:#9CA3AF;
+              text-transform:uppercase;letter-spacing:1px;">{esc(label)}</p>
+    {content}
+  </td>
+</tr>
+"""
 
 
-def case_block(c: dict) -> str:
+def finding_block(item: dict) -> str:
+    source = esc(item.get("source", ""))
+    date = esc(item.get("date_or_recency", ""))
+    url = clean_url(item.get("url", "#"))
+    finding = esc(item.get("finding", ""))
+    why = esc(item.get("why_it_matters", ""))
+
     return f"""
-<div style="background:#FAFAFA;border-radius:8px;padding:16px 18px;margin-bottom:14px;border:1px solid #E5E7EB;">
-  <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#111827;">{c.get('brand','')}</p>
-  <p style="margin:0 0 6px;font-size:13px;color:#374151;line-height:1.7;">
-    <strong>What they did:</strong> {c.get('what_they_did','')}
+<div style="padding:15px 0;border-bottom:1px solid #E5E7EB;">
+  <p style="margin:0 0 4px;font-size:12px;color:#6B7280;">
+    <strong>{source}</strong>{' · ' if source and date else ''}{date}
   </p>
-  <p style="margin:0 0 6px;font-size:13px;color:#374151;line-height:1.7;">
-    <strong>Lesson:</strong> {c.get('useful_lesson','')}
+  <p style="margin:0 0 8px;font-size:13.5px;line-height:1.65;color:#111827;">
+    {finding}
   </p>
-  <p style="margin:0;font-size:13px;color:#1E3A8A;line-height:1.7;">
-    <strong>Dell:</strong> {c.get('dell_application','')}
+  <p style="margin:0 0 8px;font-size:13px;line-height:1.65;color:#4B5563;">
+    <strong>Why it matters:</strong> {why}
   </p>
-</div>"""
+  <p style="margin:0;font-size:12.5px;">
+    <a href="{esc(url)}" style="color:#2563EB;text-decoration:none;">Read source →</a>
+  </p>
+</div>
+"""
 
 
-def ul(items: list, color: str = "#374151") -> str:
-    return "<ul style='margin:0;padding-left:18px;'>" + "".join(
-        f'<li style="margin-bottom:8px;font-size:13.5px;color:{color};line-height:1.7;">{i}</li>'
-        for i in items) + "</ul>"
+def findings_html(items: list) -> str:
+    items = safe_list(items)
+    if not items:
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No strong evidence found this cycle.</p>'
+
+    return "".join(finding_block(i) for i in items if isinstance(i, dict))
 
 
-def row(label: str, content: str, bg: str = "#fff") -> str:
-    return f"""
-<tr><td style="background:{bg};padding:20px 24px 18px;border-bottom:1px solid #F3F4F6;">
-  <p style="margin:0 0 12px;font-size:10.5px;font-weight:700;color:#9CA3AF;
-             text-transform:uppercase;letter-spacing:1px;">{label}</p>
-  {content}
-</td></tr>"""
+def links_html(items: list) -> str:
+    items = safe_list(items)
+    clean_items = [i for i in items if isinstance(i, dict) and i.get("url")]
+
+    if not clean_items:
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No links included.</p>'
+
+    return (
+        "<ul style='margin:0;padding-left:18px;'>"
+        + "".join(
+            f'<li style="margin-bottom:8px;font-size:13px;line-height:1.6;">'
+            f'<a href="{esc(clean_url(i.get("url")))}" style="color:#2563EB;text-decoration:none;">'
+            f'{esc(i.get("title", i.get("url")))}</a></li>'
+            for i in clean_items
+        )
+        + "</ul>"
+    )
 
 
 def build_html(data: dict) -> str:
-    now      = datetime.now(CST)
+    now = datetime.now(CST)
     date_str = now.strftime("%B %d, %Y")
     week_num = now.isocalendar()[1]
 
-    mats_html = f'<table width="100%" cellpadding="0" cellspacing="0">{"".join(material_row(m) for m in data.get("best_materials",[]))}</table>'
+    title = data.get("title", "Paid Social Edge")
+    issue_shape = data.get("issue_shape", "Research Issue")
+    core_angle = data.get("core_angle", "")
 
-    lessons_html = ul(data.get("key_lessons", []))
+    opening = data.get("opening", "")
+    main_takeaway = data.get("main_takeaway", "")
+    dell_application = data.get("dell_application", "")
+    internal_asset = data.get("internal_asset_idea", "")
 
-    cases_html = "".join(case_block(c) for c in data.get("case_examples", []))
-    if not cases_html:
-        cases_html = '<p style="font-size:13px;color:#9CA3AF;">No strong case examples found this cycle.</p>'
+    findings = data.get("what_was_found", [])
+    lessons = data.get("operator_lessons", [])
+    tests = data.get("what_to_test_or_monitor", [])
+    caveats = data.get("what_not_to_overlearn", [])
+    links = data.get("best_links", [])
 
-    dell_app  = data.get("dell_application", {})
-    app_html  = "".join(
-        f'<p style="margin:0 0 10px;font-size:13.5px;color:#374151;line-height:1.7;">'
-        f'<strong style="color:#1E3A8A;">{k.replace("_"," ").title()}:</strong> {v}</p>'
-        for k, v in dell_app.items() if v and v.strip()
-    )
+    opening_html = f"""
+<p style="margin:0;font-size:14px;line-height:1.75;color:#374151;">{esc(opening)}</p>
+"""
 
-    pb = data.get("playbook", {})
-    pb_html = (
-        f'<p style="margin:0 0 5px;font-size:11px;font-weight:700;color:#059669;text-transform:uppercase;letter-spacing:.7px;">What to Test</p>'
-        f'{ul(pb.get("what_to_test",[]), "#065F46")}'
-        f'<p style="margin:12px 0 5px;font-size:11px;font-weight:700;color:#D97706;text-transform:uppercase;letter-spacing:.7px;">What to Measure</p>'
-        f'{ul(pb.get("what_to_measure",[]), "#92400E")}'
-        f'<p style="margin:12px 0 5px;font-size:11px;font-weight:700;color:#DC2626;text-transform:uppercase;letter-spacing:.7px;">What to Avoid</p>'
-        f'{ul(pb.get("what_to_avoid",[]), "#991B1B")}'
-    )
+    takeaway_html = f"""
+<p style="margin:0;font-size:15px;line-height:1.75;color:#065F46;font-weight:700;">{esc(main_takeaway)}</p>
+"""
 
-    return f"""<!DOCTYPE html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Operator Deep Dive — {date_str}</title></head>
+    dell_html = f"""
+<p style="margin:0;font-size:13.5px;line-height:1.75;color:#1E3A8A;">{esc(dell_application)}</p>
+"""
+
+    asset_html = f"""
+<p style="margin:0;font-size:13.5px;line-height:1.75;color:#92400E;">{esc(internal_asset)}</p>
+"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{esc(title)}</title>
+</head>
+
 <body style="margin:0;padding:0;background:#F3F4F6;" bgcolor="#F3F4F6">
-<table width="100%" bgcolor="#F3F4F6" style="background:#F3F4F6;
-             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px;">
-<table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;">
+<table width="100%" bgcolor="#F3F4F6" style="background:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+      <table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;">
 
-  <tr><td style="background:#065F46;border-radius:12px 12px 0 0;padding:32px 36px 28px;"
-        bgcolor="#065F46">
-    <p style="margin:0 0 5px;font-size:10px;font-weight:700;letter-spacing:2.5px;
-               color:#6EE7B7;text-transform:uppercase;">
-      Operator Deep Dive &nbsp;·&nbsp; Week {week_num} &nbsp;·&nbsp; {date_str}
-    </p>
-    <h2 style="margin:0 0 14px;font-size:22px;font-weight:800;color:#fff;line-height:1.3;">
-      {data.get('topic','')}
-    </h2>
-    <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#34D399;text-transform:uppercase;letter-spacing:.8px;">
-      Focus this edition
-    </p>
-    <p style="margin:0 0 14px;font-size:13.5px;color:#D1FAE5;line-height:1.7;">
-      {data.get('focus_angle','')}
-    </p>
-    <p style="margin:0;font-size:13.5px;color:#A7F3D0;line-height:1.7;font-style:italic;">
-      {data.get('why_it_matters_for_dell','')}
-    </p>
-  </td></tr>
-  <tr><td style="background:#059669;height:3px;"></td></tr>
+        <tr>
+          <td style="background:#064E3B;border-radius:14px 14px 0 0;padding:34px 36px 30px;" bgcolor="#064E3B">
+            <p style="margin:0 0 8px;font-size:10px;font-weight:800;letter-spacing:2.3px;color:#6EE7B7;text-transform:uppercase;">
+              Paid Social Edge · Week {week_num} · {esc(date_str)}
+            </p>
 
-  <tr><td><table width="100%" cellpadding="0" cellspacing="0">
-    {row("Best Materials", mats_html)}
-    {row("Key Lessons", lessons_html, "#FAFAFA")}
-    {row("Case Examples", cases_html)}
-    {row("Dell Application", app_html, "#FAFAFA")}
-    {row("Practical Playbook", pb_html)}
-    <tr><td style="background:#EFF6FF;padding:18px 24px;border-bottom:1px solid #F3F4F6;" bgcolor="#EFF6FF">
-      <p style="margin:0 0 6px;font-size:10.5px;font-weight:700;color:#1D4ED8;text-transform:uppercase;letter-spacing:1px;">Internal Asset Idea</p>
-      <p style="margin:0;font-size:13.5px;color:#1E40AF;line-height:1.7;">{data.get('internal_asset_idea','')}</p>
-    </td></tr>
-    <tr><td style="background:#FEF3C7;padding:18px 24px;" bgcolor="#FEF3C7">
-      <p style="margin:0 0 6px;font-size:10.5px;font-weight:700;color:#D97706;text-transform:uppercase;letter-spacing:1px;">Personal Skill Takeaway</p>
-      <p style="margin:0;font-size:13.5px;color:#92400E;line-height:1.7;">{data.get('personal_skill_takeaway','')}</p>
-    </td></tr>
-  </table></td></tr>
+            <p style="margin:0 0 10px;font-size:11px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:1px;">
+              {esc(issue_shape)}
+            </p>
 
-  <tr><td style="background:#111827;border-radius:0 0 12px 12px;padding:18px 36px;text-align:center;" bgcolor="#111827">
-    <p style="margin:0;font-size:12px;color:#6B7280;">
-      Paid Social Edge &nbsp;·&nbsp; Operator Deep Dive &nbsp;·&nbsp; Dell Paid Social
-    </p>
-  </td></tr>
+            <h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;font-weight:850;color:#FFFFFF;">
+              {esc(title)}
+            </h1>
 
-</table></td></tr></table></body></html>"""
+            <p style="margin:0;font-size:14px;line-height:1.65;color:#D1FAE5;">
+              {esc(core_angle)}
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#10B981;height:4px;"></td>
+        </tr>
+
+        {section("Why this matters", opening_html)}
+        {section("Main takeaway", takeaway_html, "#ECFDF5")}
+        {section("What was found", findings_html(findings))}
+        {section("Operator lessons", bullet_list(lessons), "#FAFAFA")}
+        {section("Dell application", dell_html, "#EFF6FF")}
+        {section("What to test or monitor", bullet_list(tests, "#065F46"))}
+        {section("What not to overlearn", bullet_list(caveats, "#991B1B"), "#FEF2F2")}
+        {section("Internal asset idea", asset_html, "#FEF3C7")}
+        {section("Best links", links_html(links))}
+
+        <tr>
+          <td style="background:#111827;border-radius:0 0 14px 14px;padding:18px 36px;text-align:center;" bgcolor="#111827">
+            <p style="margin:0;font-size:12px;color:#9CA3AF;">
+              Paid Social Edge · Evidence-led research for Dell paid social
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>"""
 
 
 # ── Send ──────────────────────────────────────────────────────────────────────
-def send(html: str, subject: str):
+
+def send_email(html: str, subject: str):
     resend.api_key = RESEND_API_KEY
+
     with open(SUBSCRIBERS_FILE) as f:
         subs = json.load(f)
+
     emails = subs.get("emails", [])
     if not emails:
-        print("No subscribers."); return
-    sent = failed = 0
+        print("No subscribers found.")
+        return
+
+    sent = 0
+    failed = 0
+
     for email in emails:
         try:
-            resend.Emails.send({"from": f"{FROM_NAME} <{FROM_EMAIL}>",
-                                "to": email, "subject": subject, "html": html})
-            print(f"  Sent: {email}"); sent += 1; time.sleep(0.2)
+            resend.Emails.send({
+                "from": f"{FROM_NAME} <{FROM_EMAIL}>",
+                "to": email,
+                "subject": subject,
+                "html": html
+            })
+            print(f"  Sent: {email}")
+            sent += 1
+            time.sleep(0.2)
+
         except Exception as e:
-            print(f"  Failed: {email} — {e}"); failed += 1
+            print(f"  Failed: {email} — {e}")
+            failed += 1
+
     print(f"Done. {sent} sent / {failed} failed.")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
 def main():
     check_week()
+
     today = datetime.now(CST).strftime("%B %d, %Y")
 
-    # Phase 1: Landscape scan
-    print("\n[Phase 1] Landscape scan across quality sources...")
-    landscape_raw = search_batch(LANDSCAPE_QUERIES, max_results=4, label="Scan")
+    print("\n[Phase 1] Generating diverse discovery queries...")
+    query_prompt = build_discovery_query_prompt(today)
 
-    # Phase 2: AI selects topic based on available material
-    print("\n[Phase 2] Pausing to avoid rate limits...")
-    time.sleep(8)
-    print("[Phase 2] Selecting best topic based on available material...")
-    selection_prompt = TOPIC_SELECTION_PROMPT.format(
-        today=today,
-        landscape_results=landscape_raw[:8000],   # trim to fit Groq context
-        topics=TOPIC_CANDIDATES,
-    )
-    selection = call_groq(selection_prompt, max_tokens=800)
-    topic       = selection["selected_topic"]
-    focus_angle = selection["focus_angle"]
-    rationale   = selection["selection_rationale"]
-    queries     = selection["suggested_search_queries"]
-    print(f"  Selected topic: {topic}")
-    print(f"  Rationale: {rationale}")
+    try:
+        query_data = call_groq(query_prompt, max_tokens=900, temperature=0.45)
+        discovery_queries = query_data.get("queries", [])
+        if not discovery_queries:
+            raise ValueError("No queries returned by model.")
+    except Exception as e:
+        print(f"  Query generation failed, using fallback queries. Error: {e}")
+        discovery_queries = fallback_discovery_queries()
 
-    # Phase 3: Deep targeted research on selected topic
-    print(f"\n[Phase 3] Deep research on: {topic}...")
+    print("\nDiscovery queries:")
+    for q in discovery_queries:
+        print(f"  - {q}")
+
+    print("\n[Phase 2] Broad discovery search...")
+    landscape_raw = search_batch(discovery_queries, max_results=4, label="Discovery")
+
+    if not landscape_raw.strip():
+        raise RuntimeError("No search results returned from Tavily.")
+
+    print("\n[Phase 3] Selecting issue shape and angle from evidence...")
     time.sleep(5)
-    deep_raw = search_batch(queries, max_results=4, label="Deep")
 
-    # Phase 4: Compile
-    print("\n[Phase 4] Pausing before compile call...")
-    time.sleep(10)
-    print("[Phase 4] Compiling operator memo...")
-    deep_prompt = DEEP_DIVE_PROMPT.format(
+    selection_prompt = build_issue_selection_prompt(
         today=today,
-        topic=topic,
-        focus_angle=focus_angle,
-        deep_results=deep_raw[:3500],
-        landscape_results=landscape_raw[:1500],
+        landscape_results=landscape_raw[:10000]
     )
-    data = call_groq(deep_prompt, max_tokens=2000)
 
-    html    = build_html(data)
-    short   = topic[:40] + ("…" if len(topic) > 40 else "")
-    subject = f"Deep Dive: {short}"
-    print(f"Subject: {subject}")
-    send(html, subject)
+    selection = call_groq(selection_prompt, max_tokens=1400, temperature=0.25)
+
+    issue_shape = selection.get("issue_shape", "Research Issue")
+    issue_title = selection.get("issue_title", "Paid Social Edge")
+    core_angle = selection.get("core_angle", "")
+    why_this_issue = selection.get("why_this_issue", "")
+    what_not_to_do = selection.get("what_not_to_do", "")
+    targeted_queries = selection.get("targeted_search_queries", [])
+
+    if not targeted_queries:
+        targeted_queries = discovery_queries[:5]
+
+    print(f"\nSelected issue shape: {issue_shape}")
+    print(f"Selected title: {issue_title}")
+    print(f"Core angle: {core_angle}")
+    print(f"Why this issue: {why_this_issue}")
+    print(f"Avoiding: {what_not_to_do}")
+
+    print("\n[Phase 4] Targeted follow-up search...")
+    time.sleep(5)
+    deep_raw = search_batch(targeted_queries, max_results=4, label="Targeted")
+
+    print("\n[Phase 5] Writing final research issue...")
+    time.sleep(8)
+
+    writer_prompt = build_issue_writer_prompt(
+        today=today,
+        issue_shape=issue_shape,
+        issue_title=issue_title,
+        core_angle=core_angle,
+        why_this_issue=why_this_issue,
+        what_not_to_do=what_not_to_do,
+        deep_results=deep_raw[:9000],
+        landscape_results=landscape_raw[:3500]
+    )
+
+    data = call_groq(writer_prompt, max_tokens=2600, temperature=0.25)
+
+    subject = data.get("subject_line") or f"Paid Social Edge: {data.get('title', issue_title)}"
+    subject = compact_text(subject, 70)
+
+    html = build_html(data)
+
+    print(f"\nSubject: {subject}")
+    print("[Phase 6] Sending email...")
+    send_email(html, subject)
 
 
 if __name__ == "__main__":
