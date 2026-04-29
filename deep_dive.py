@@ -30,7 +30,7 @@ def check_week():
     week = datetime.now(CST).isocalendar()[1]
    # if week % 2 == 0:
     #    print(f"Week {week} is even — deep dive skips. Brief runs this week.")
-        exit(0)
+      #  exit(0)
     print(f"Week {week} (odd) — running deep dive.")
 
 # ── Possible topics ───────────────────────────────────────────────────────────
