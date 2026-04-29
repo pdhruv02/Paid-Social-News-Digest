@@ -1,19 +1,19 @@
 """
-Paid Social Edge — Evidence-Led Research Issue
+Paid Social Edge — Evidence-Led Paid Social Newsletter
 Runs on odd ISO weeks, Tuesday 6 AM CST
 
-What this script does differently:
-Phase 1: AI generates diverse discovery queries for this run
-Phase 2: Tavily searches broadly across evidence types
-Phase 3: AI decides what the issue should be based on what was actually found
+Core logic:
+Phase 1: AI generates diverse discovery queries
+Phase 2: Tavily searches broadly
+Phase 3: AI decides what this issue should be based on evidence
 Phase 4: Tavily performs targeted follow-up research
-Phase 5: AI writes a flexible, operator-grade issue
+Phase 5: AI writes a flexible, high-quality operator newsletter
 Phase 6: Email is sent via Resend
 
 No memory file.
-No fixed topic candidates.
+No fixed topic list.
 No forced case studies.
-No rigid topic rotation.
+No Dell-branded teaching tone.
 """
 
 from tavily import TavilyClient
@@ -46,13 +46,13 @@ CST              = pytz.timezone("US/Central")
 def check_week():
     """
     Keeps this as a biweekly run using odd ISO weeks.
-    If your scheduler already controls cadence, you can comment out check_week()
+    If your scheduler already controls cadence, comment out check_week()
     inside main().
     """
     week = datetime.now(CST).isocalendar()[1]
-   # if week % 2 == 0:
-      #  print(f"Week {week} is even — skipping this biweekly run.")
-      #  exit(0)
+    if week % 2 == 0:
+        print(f"Week {week} is even — skipping this biweekly run.")
+        exit(0)
     print(f"Week {week} is odd — running Paid Social Edge issue.")
 
 
@@ -94,9 +94,8 @@ def extract_json(raw: str) -> dict:
     Handles accidental markdown fences or small preambles.
     """
     clean = re.sub(r"```(?:json)?|```", "", raw or "").strip()
-
-    # Prefer first full JSON object.
     match = re.search(r"\{.*\}", clean, re.DOTALL)
+
     if not match:
         raise ValueError(f"No JSON object found in model output:\n{raw[:800]}")
 
@@ -144,23 +143,25 @@ def build_discovery_query_prompt(today: str) -> str:
     return f"""
 Today is {today}.
 
-You are creating search queries for a paid social research automation.
+You are creating search queries for a high-quality paid social research newsletter.
 
-The reader works on Dell's in-house paid social team.
+Private reader context:
+- The reader works in paid social at a large technology company.
+- They care about paid social strategy, creative testing, measurement, attribution, platform automation, B2B buyer behavior, competitor messaging, AI workflows, and in-house media operations.
+- Relevant categories include enterprise technology, consumer PCs/laptops, gaming, AI PCs, B2B demand generation, and performance media.
 
-Dell context:
-- Dell sells enterprise B2B IT solutions, servers, storage, consumer PCs/laptops, and Alienware gaming products.
-- Competitors include HP, Lenovo, Apple, Microsoft, NVIDIA ecosystem companies, and other enterprise/consumer tech brands.
-- The reader cares about paid social strategy, creative testing, measurement, attribution, platform automation, B2B buyer behavior, competitor messaging, AI workflows, and in-house media operations.
+Important:
+This private context is only for relevance filtering.
+Do NOT make the newsletter sound company-specific.
+Do NOT write as if you are teaching the reader's company what to do.
+Do NOT overuse company names unless discussing public examples.
 
 Your job:
 Generate broad, diverse discovery queries for this run.
 
-Important:
 Do NOT generate queries from a fixed syllabus.
 Do NOT only search for case studies.
 Do NOT only search for LinkedIn or B2B.
-Do NOT make every query about Dell.
 Do NOT assume what the issue will be about.
 
 The goal is to discover what is worth writing about this time.
@@ -206,15 +207,21 @@ Today is {today}.
 
 You are not choosing from a fixed topic list.
 
-You are acting as a paid social research editor for someone on Dell's in-house paid social team.
+You are acting as the editor of a high-quality paid social operator newsletter.
 
-The goal is not to create a generic newsletter.
+The goal is not to create a generic marketing newsletter.
 The goal is to discover the most useful paid social learning opportunity from this research run.
 
-Dell context:
-- Dell sells enterprise B2B IT solutions, consumer PCs/laptops, and Alienware gaming products.
-- Dell competes with HP, Lenovo, Apple, Microsoft, NVIDIA ecosystem companies, and other enterprise/consumer tech brands.
-- The reader works in paid social and cares about creative, measurement, platform automation, competitor positioning, B2B buyer behavior, campaign testing, and in-house media operations.
+Private reader context:
+- The reader works in paid social at a large technology company.
+- They care about creative, measurement, platform automation, competitor positioning, B2B buyer behavior, campaign testing, and in-house media operations.
+- Relevant categories include enterprise technology, consumer PCs/laptops, gaming, AI PCs, and B2B demand generation.
+
+Important voice rule:
+Use the private reader context only to judge relevance.
+Do NOT write the issue as if it is teaching the reader's company what to do.
+Do NOT say things like “the team must,” “the company should,” “this proves the team needs to,” or similar.
+The final issue should feel like a smart external newsletter for paid social operators.
 
 Raw research results:
 {landscape_results}
@@ -228,7 +235,7 @@ Do NOT choose something just because there is a lot of material on it.
 Do NOT write about a generic evergreen topic unless the sources found in this run reveal a useful angle.
 Do NOT force a case study.
 Do NOT force a platform update.
-Do NOT force Dell relevance if the connection is weak.
+Do NOT force company-specific relevance if the connection is weak.
 
 Instead, identify the strongest research opportunity from this specific run.
 
@@ -246,7 +253,7 @@ A strong opportunity may come from:
 - A useful warning about an overhyped idea
 
 Ask yourself:
-1. What would be genuinely useful for a Dell paid social operator?
+1. What would be genuinely useful for a paid social operator?
 2. What feels specific to the sources found this time?
 3. What is not just a generic topic anyone could write about?
 4. What would make the reader think differently, test differently, measure differently, or explain something better?
@@ -266,7 +273,8 @@ Possible issue shapes:
 - Buyer Behavior Note
 - In-House Ops Memo
 
-These are not mandatory categories. Use a different shape if the evidence calls for it.
+These are not mandatory categories.
+Use a different shape if the evidence calls for it.
 
 If the raw results are weak:
 - Do not pretend there is a major insight.
@@ -310,9 +318,10 @@ def build_issue_writer_prompt(
     return f"""
 Today is {today}.
 
-You are writing a paid social research issue for someone on Dell's in-house paid social team.
+You are writing a high-quality paid social operator newsletter.
 
-This is not a generic newsletter.
+This is not a generic marketing newsletter.
+This is not a company memo.
 This is not a fixed-format deep dive.
 This issue should follow the evidence and the selected issue shape.
 
@@ -337,10 +346,20 @@ Raw targeted research:
 Earlier landscape results:
 {landscape_results}
 
-Dell context:
-- Dell sells enterprise B2B IT solutions, servers, storage, consumer PCs/laptops, and Alienware gaming products.
-- Competitors include HP, Lenovo, Apple, Microsoft, NVIDIA ecosystem companies, and other enterprise/consumer tech brands.
-- The reader works on paid social and cares about campaign decisions, creative testing, measurement quality, buyer behavior, platform automation, and in-house team capability.
+Private reader context:
+- The reader works in paid social at a large technology company.
+- They care about campaign decisions, creative testing, measurement quality, buyer behavior, platform automation, competitor patterns, and in-house team capability.
+- Relevant categories include enterprise tech, consumer tech, gaming, B2B demand generation, AI PCs, and performance media.
+
+Very important voice rules:
+- Do NOT write as if you are teaching the reader's company what to do.
+- Do NOT say “the team must,” “the company should,” “the brand needs to,” or similar.
+- Do NOT overuse any specific company name.
+- Do NOT make the output sound like an internal strategy memo directed at leadership.
+- Write like a smart external paid social newsletter: analytical, practical, sharp, and respectful.
+- Use phrases like “a useful takeaway,” “one practical implication,” “where this applies,” “worth testing,” “worth watching,” or “the operator lesson.”
+- Keep the tone confident but not prescriptive.
+- Make the reader feel smarter, not judged.
 
 Your goal:
 Write a useful, sharp, operator-grade research issue.
@@ -353,12 +372,12 @@ The output should help the reader do at least one of these:
 - Understand buyers better
 - Spot competitor patterns
 - Build a useful internal asset
-- Make better paid social decisions at Dell
+- Make better paid social decisions
 
 Rules:
 - Do not force sections that do not fit.
 - Do not force case studies if the case material is weak.
-- Do not force Dell B2B, consumer, gaming, measurement, creative, and ops sections if only some are relevant.
+- Do not force B2B, consumer, gaming, measurement, creative, and ops sections if only some are relevant.
 - Do not summarize every source one by one unless that is useful.
 - Do not overstate platform promotional case studies.
 - Mark paywalled or partially accessible sources clearly.
@@ -366,6 +385,7 @@ Rules:
 - Prefer sharp judgment over completeness.
 - Be specific and practical.
 - Avoid generic marketing language.
+- Avoid corporate-sounding recommendations.
 
 Return ONLY valid JSON.
 
@@ -389,7 +409,7 @@ Return ONLY valid JSON.
     "Practical lesson 2",
     "Practical lesson 3"
   ],
-  "dell_application": "Specific application to Dell. Keep this practical and only include real connections.",
+  "practical_implication": "Specific application for paid social operators. Keep this practical and avoid company-specific prescriptions.",
   "what_to_test_or_monitor": [
     "Specific test, question, or monitoring idea 1",
     "Specific test, question, or monitoring idea 2"
@@ -398,7 +418,7 @@ Return ONLY valid JSON.
     "Caveat or limitation 1",
     "Caveat or limitation 2"
   ],
-  "internal_asset_idea": "One useful internal asset this could become, if applicable.",
+  "internal_asset_idea": "One useful asset this could become, if applicable.",
   "best_links": [
     {{
       "title": "Title",
@@ -468,7 +488,7 @@ def fallback_discovery_queries() -> list:
         "paid social measurement attribution incrementality MMM research report",
         "B2B buyer behavior enterprise technology marketing research report",
         "paid social creative testing case study campaign teardown",
-        "Dell HP Lenovo Apple Microsoft AI PC advertising campaign messaging",
+        "HP Lenovo Apple Microsoft AI PC advertising campaign messaging",
         "LinkedIn Ads Reddit Ads Meta Ads B2B case study campaign results",
         "AdExchanger Digiday Marketing Brew paid social AI advertising automation",
         "Think with Google IAB WARC Effie advertising effectiveness case study digital media",
@@ -568,7 +588,7 @@ def build_html(data: dict) -> str:
 
     opening = data.get("opening", "")
     main_takeaway = data.get("main_takeaway", "")
-    dell_application = data.get("dell_application", "")
+    practical_implication = data.get("practical_implication", "")
     internal_asset = data.get("internal_asset_idea", "")
 
     findings = data.get("what_was_found", [])
@@ -585,8 +605,8 @@ def build_html(data: dict) -> str:
 <p style="margin:0;font-size:15px;line-height:1.75;color:#065F46;font-weight:700;">{esc(main_takeaway)}</p>
 """
 
-    dell_html = f"""
-<p style="margin:0;font-size:13.5px;line-height:1.75;color:#1E3A8A;">{esc(dell_application)}</p>
+    implication_html = f"""
+<p style="margin:0;font-size:13.5px;line-height:1.75;color:#1E3A8A;">{esc(practical_implication)}</p>
 """
 
     asset_html = f"""
@@ -635,7 +655,7 @@ def build_html(data: dict) -> str:
         {section("Main takeaway", takeaway_html, "#ECFDF5")}
         {section("What was found", findings_html(findings))}
         {section("Operator lessons", bullet_list(lessons), "#FAFAFA")}
-        {section("Dell application", dell_html, "#EFF6FF")}
+        {section("Practical implication", implication_html, "#EFF6FF")}
         {section("What to test or monitor", bullet_list(tests, "#065F46"))}
         {section("What not to overlearn", bullet_list(caveats, "#991B1B"), "#FEF2F2")}
         {section("Internal asset idea", asset_html, "#FEF3C7")}
@@ -644,7 +664,7 @@ def build_html(data: dict) -> str:
         <tr>
           <td style="background:#111827;border-radius:0 0 14px 14px;padding:18px 36px;text-align:center;" bgcolor="#111827">
             <p style="margin:0;font-size:12px;color:#9CA3AF;">
-              Paid Social Edge · Evidence-led research for Dell paid social
+              Paid Social Edge · Evidence-led research for paid social operators
             </p>
           </td>
         </tr>
