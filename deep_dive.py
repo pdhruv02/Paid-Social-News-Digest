@@ -50,9 +50,9 @@ def check_week():
     inside main().
     """
     week = datetime.now(CST).isocalendar()[1]
-    if week % 2 == 0:
-        print(f"Week {week} is even — skipping this biweekly run.")
-        exit(0)
+    #if week % 2 == 0:
+     #   print(f"Week {week} is even — skipping this biweekly run.")
+     #   exit(0)
     print(f"Week {week} is odd — running Paid Social Edge issue.")
 
 
