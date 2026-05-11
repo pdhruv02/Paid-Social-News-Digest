@@ -56,9 +56,9 @@ RUN_ODD_WEEKS_ONLY = os.environ.get("RUN_ODD_WEEKS_ONLY", "false").lower() == "t
 def check_week():
     week = datetime.now(CST).isocalendar()[1]
 
-    if RUN_ODD_WEEKS_ONLY and week % 2 == 0:
-        print(f"Week {week} is even — skipping this deep dive run.")
-        exit(0)
+    # if RUN_ODD_WEEKS_ONLY and week % 2 == 0:
+     #   print(f"Week {week} is even — skipping this deep dive run.")
+     #   exit(0)
 
     print(f"Week {week} — running Paid Social Edge deep dive.")
 
