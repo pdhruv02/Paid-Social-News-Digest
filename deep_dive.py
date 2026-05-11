@@ -401,7 +401,7 @@ Return ONLY valid JSON.
       "how_to_read_it": "How to interpret this source carefully."
     }}
   ],
-  "operator_read/summary": [
+  "operator_read": [
     "A specific operator-level takeaway. Must be concrete and non-obvious.",
     "A second operator-level takeaway that adds a different idea.",
     "A third operator-level takeaway that adds a different idea."
@@ -738,10 +738,7 @@ def build_html(data: dict) -> str:
         {section("Opening", opening_html)}
         {section("The interesting part", interesting_sections_html(interesting_part), "#FAFAFA")}
         {section("Source trail", source_trail_html(source_trail))}
-        {section("Operator read", bullet_list(operator_read), "#F9FAFB")}
-        {section("Questions worth asking", bullet_list(questions, "#1E3A8A"), "#EFF6FF")}
-        {section("What not to overclaim", bullet_list(caveats, "#991B1B"), "#FEF2F2")}
-        {section("Read this first", read_this_first_html(read_first), "#ECFDF5")}
+        {section("Operator read/Summary", bullet_list(operator_read), "#F9FAFB")}
         {section("Best links", links_html(best_links))}
 
         <tr>
