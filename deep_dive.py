@@ -1,18 +1,19 @@
 """
-Paid Social Edge — Evidence-Led Paid Social Newsletter
+Paid Social Edge — Source-Led Deep Dive Newsletter
 Runs on odd ISO weeks, Tuesday 6 AM CST
 
 Core logic:
-Phase 1: AI generates diverse discovery queries
+Phase 1: AI generates broad discovery queries
 Phase 2: Tavily searches broadly
-Phase 3: AI decides what this issue should be based on evidence
-Phase 4: Tavily performs targeted follow-up research
-Phase 5: AI writes a flexible, high-quality operator newsletter
-Phase 6: Email is sent via Resend
+Phase 3: AI finds the strongest "golden thread" from the evidence
+Phase 4: Tavily does targeted source-deepening research with raw content
+Phase 5: AI writes an article-style paid social deep dive
+Phase 6: AI refines the draft to remove generic/template writing
+Phase 7: Email is sent via Resend
 
-No memory file.
 No fixed topic list.
 No forced case studies.
+No forced "operator lessons / what to test" template.
 No Dell-branded teaching tone.
 """
 
@@ -40,26 +41,25 @@ SUBSCRIBERS_FILE = "subscribers.json"
 MODEL            = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 CST              = pytz.timezone("US/Central")
 
+# Set this to true in GitHub Actions env if you want odd-week gating.
+RUN_ODD_WEEKS_ONLY = os.environ.get("RUN_ODD_WEEKS_ONLY", "false").lower() == "true"
 
-# ── Optional week gate: odd weeks only ─────────────────────────────────────────
+
+# ── Week gate ─────────────────────────────────────────────────────────────────
 
 def check_week():
-    """
-    Keeps this as a biweekly run using odd ISO weeks.
-    If your scheduler already controls cadence, comment out check_week()
-    inside main().
-    """
     week = datetime.now(CST).isocalendar()[1]
-    #if week % 2 == 0:
-     #   print(f"Week {week} is even — skipping this biweekly run.")
-     #   exit(0)
-    print(f"Week {week} is odd — running Paid Social Edge issue.")
+
+   # if RUN_ODD_WEEKS_ONLY and week % 2 == 0:
+      #  print(f"Week {week} is even — skipping this deep dive run.")
+      #  exit(0)
+
+    print(f"Week {week} — running Paid Social Edge deep dive.")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def esc(value) -> str:
-    """Escape text for safe email HTML."""
     if value is None:
         return ""
     return html_lib.escape(str(value), quote=True)
@@ -82,27 +82,26 @@ def safe_list(value):
 def compact_text(text: str, max_chars: int) -> str:
     if not text:
         return ""
+
     text = re.sub(r"\s+", " ", str(text)).strip()
+
     if len(text) <= max_chars:
         return text
+
     return text[:max_chars].rsplit(" ", 1)[0] + "..."
 
 
 def extract_json(raw: str) -> dict:
-    """
-    Extract JSON object from model output.
-    Handles accidental markdown fences or small preambles.
-    """
     clean = re.sub(r"```(?:json)?|```", "", raw or "").strip()
     match = re.search(r"\{.*\}", clean, re.DOTALL)
 
     if not match:
-        raise ValueError(f"No JSON object found in model output:\n{raw[:800]}")
+        raise ValueError(f"No JSON object found in model output:\n{raw[:900]}")
 
     return json.loads(match.group())
 
 
-def call_groq(prompt: str, max_tokens: int = 1800, temperature: float = 0.25) -> dict:
+def call_groq(prompt: str, max_tokens: int = 2200, temperature: float = 0.25) -> dict:
     groq_client = Groq(api_key=GROQ_API_KEY)
 
     for attempt in range(3):
@@ -143,7 +142,7 @@ def build_discovery_query_prompt(today: str) -> str:
     return f"""
 Today is {today}.
 
-You are creating search queries for a high-quality paid social research newsletter.
+You are creating search queries for a high-quality paid social deep dive newsletter.
 
 Private reader context:
 - The reader works in paid social at a large technology company.
@@ -151,36 +150,47 @@ Private reader context:
 - Relevant categories include enterprise technology, consumer PCs/laptops, gaming, AI PCs, B2B demand generation, and performance media.
 
 Important:
-This private context is only for relevance filtering.
-Do NOT make the newsletter sound company-specific.
-Do NOT write as if you are teaching the reader's company what to do.
-Do NOT overuse company names unless discussing public examples.
+This context is only for relevance filtering.
+The newsletter should not sound company-specific.
+Do not write queries only about one company.
+Do not assume the issue topic before research.
 
 Your job:
-Generate broad, diverse discovery queries for this run.
+Generate diverse discovery queries that can surface rare, specific, non-obvious material.
 
-Do NOT generate queries from a fixed syllabus.
-Do NOT only search for case studies.
-Do NOT only search for LinkedIn or B2B.
-Do NOT assume what the issue will be about.
+Avoid generic searches like:
+- "AI paid social best practices"
+- "paid social trends"
+- "how to improve ROI with ads"
 
-The goal is to discover what is worth writing about this time.
+Instead, search for materials that are likely to contain:
+- Specific campaign mechanics
+- Case studies with actual detail
+- Research reports with data
+- Practitioner teardowns
+- Competitor messaging patterns
+- Measurement debates
+- Creative testing systems
+- Platform automation changes with strategic consequences
+- Buyer behavior evidence
+- In-house media operating lessons
 
-Cover different evidence types:
-- Platform changes
-- AI and automation in advertising
-- Competitor activity and messaging
-- Case studies or campaign examples
-- Research reports
-- Practitioner/operator teardowns
-- Buyer behavior
-- Measurement and attribution
-- Creative strategy
-- In-house media or operating model shifts
-
-Use a mix of recent and evergreen-oriented queries.
-Some queries should look for recent developments.
-Some should look for strong case studies or research from the last few years.
+Include some source-specific queries using sources like:
+- Effie
+- WARC
+- IPA
+- Think with Google
+- LinkedIn B2B Institute
+- Reddit for Business
+- Meta for Business
+- TikTok Business
+- YouTube Works
+- IAB
+- AdExchanger
+- Digiday
+- Marketing Brew
+- eMarketer
+- practitioner teardown sources
 
 Return ONLY valid JSON.
 
@@ -195,152 +205,125 @@ Return ONLY valid JSON.
     "query 7",
     "query 8",
     "query 9",
-    "query 10"
+    "query 10",
+    "query 11",
+    "query 12"
   ]
 }}
 """
 
 
-def build_issue_selection_prompt(today: str, landscape_results: str) -> str:
+def build_story_selection_prompt(today: str, landscape_results: str) -> str:
     return f"""
 Today is {today}.
 
-You are not choosing from a fixed topic list.
+You are the editor of a paid social deep dive newsletter.
 
-You are acting as the editor of a high-quality paid social operator newsletter.
+Your job is NOT to choose a broad topic.
+Your job is to find the strongest "golden thread" from the research results.
 
-The goal is not to create a generic marketing newsletter.
-The goal is to discover the most useful paid social learning opportunity from this research run.
+A golden thread is a specific, interesting, evidence-backed angle that can become a genuinely useful read.
+
+Raw landscape results:
+{landscape_results}
 
 Private reader context:
 - The reader works in paid social at a large technology company.
-- They care about creative, measurement, platform automation, competitor positioning, B2B buyer behavior, campaign testing, and in-house media operations.
-- Relevant categories include enterprise technology, consumer PCs/laptops, gaming, AI PCs, and B2B demand generation.
+- They care about practical paid social judgment, not generic marketing commentary.
+- Relevant areas include B2B, consumer tech, gaming, AI PCs, creative testing, measurement, platform automation, buyer behavior, competitor messaging, and in-house media operations.
 
-Important voice rule:
-Use the private reader context only to judge relevance.
-Do NOT write the issue as if it is teaching the reader's company what to do.
-Do NOT say things like “the team must,” “the company should,” “this proves the team needs to,” or similar.
-The final issue should feel like a smart external newsletter for paid social operators.
+Editorial standard:
+The issue should feel like a smart paid social essay or field note, not a template.
 
-Raw research results:
-{landscape_results}
+Do NOT select an angle like:
+- "AI can improve creative testing"
+- "Measurement is important"
+- "B2B buyers need trust"
+- "Creative testing improves performance"
+- "Platform automation is changing paid social"
 
-Your task:
-Look across the raw results and decide what this issue should actually be about.
+Those are too broad and generic.
 
-Do NOT force a topic.
-Do NOT pick the broadest or most obvious theme.
-Do NOT choose something just because there is a lot of material on it.
-Do NOT write about a generic evergreen topic unless the sources found in this run reveal a useful angle.
-Do NOT force a case study.
-Do NOT force a platform update.
-Do NOT force company-specific relevance if the connection is weak.
+A good angle looks more like:
+- "The hidden risk in AI creative testing is not volume — it is losing the buyer language that made the ad work."
+- "Why lead-gen efficiency can hide quality decay when the conversion signal is too shallow."
+- "The interesting thing about competitor AI PC ads is not the product claim, but which user anxiety they choose to reduce."
+- "The case study is less useful for its result and more useful for how the campaign connected creative input to downstream signal."
 
-Instead, identify the strongest research opportunity from this specific run.
-
-A strong opportunity may come from:
-- A meaningful platform change
-- A strong case study
-- A competitor messaging pattern
-- A new research report
-- A practitioner teardown
-- A buyer behavior insight
-- A measurement or attribution warning
-- A creative testing lesson
-- An AI/automation shift
-- A surprising connection across multiple sources
-- A useful warning about an overhyped idea
-
-Ask yourself:
-1. What would be genuinely useful for a paid social operator?
-2. What feels specific to the sources found this time?
-3. What is not just a generic topic anyone could write about?
-4. What would make the reader think differently, test differently, measure differently, or explain something better?
-5. What would be worth reading even if the reader is busy?
-
-Choose the issue shape based on the evidence.
-
-Possible issue shapes:
-- Signal Brief
-- Case Teardown
-- Competitor Watch
-- Research Breakdown
-- Operator Lesson
-- Platform Shift Memo
-- Measurement Warning
-- Creative Swipe File
-- Buyer Behavior Note
-- In-House Ops Memo
-
-These are not mandatory categories.
-Use a different shape if the evidence calls for it.
-
-If the raw results are weak:
-- Do not pretend there is a major insight.
-- Choose a smaller but useful angle.
-- Clearly say the evidence is thin.
+Selection rules:
+1. Prefer source material with concrete details, not broad advice.
+2. Prefer one strong source plus 2 supporting sources over 8 weak sources.
+3. Prefer surprising or under-discussed angles.
+4. Reject sources that only say obvious things.
+5. If the evidence is weak, say so and choose a narrower issue.
+6. Do not force a case study if the case study is thin.
+7. Do not make the issue sound like it is teaching any specific company what to do.
 
 Return ONLY valid JSON.
 
 {{
-  "issue_shape": "The format this issue should take",
-  "issue_title": "Specific title, not a broad generic topic",
-  "core_angle": "The sharp question or learning this issue should focus on",
-  "why_this_issue": "Why this is the most useful opportunity from this research run",
-  "what_not_to_do": "What obvious or generic angle you are intentionally avoiding",
-  "evidence_to_use": [
+  "should_publish": true,
+  "issue_mode": "Deep Read | Case Teardown | Research Breakdown | Competitor Pattern | Measurement Note | Creative Analysis | Buyer Behavior Note | Platform Shift",
+  "headline": "Specific headline, not a generic topic",
+  "subhead": "One sentence explaining the sharp angle",
+  "golden_thread": "The specific insight this issue will explore",
+  "why_this_is_interesting": "Why this is not a generic newsletter topic",
+  "source_bar": "Strong | Medium | Thin",
+  "editorial_warning": "What the writer must avoid so the issue does not become generic",
+  "primary_sources_to_use": [
     {{
       "title": "Source title",
       "source": "Source name",
       "url": "URL",
       "date_or_recency": "Date or recency",
-      "why_it_matters": "Why this source supports the issue"
+      "specific_detail": "The concrete detail that makes this source useful"
     }}
   ],
   "targeted_search_queries": [
-    "5 to 8 follow-up queries to deepen this exact issue angle"
+    "5 to 8 queries that deepen this exact golden thread, not the broad topic"
   ]
 }}
 """
 
 
-def build_issue_writer_prompt(
+def build_writer_prompt(
     today: str,
-    issue_shape: str,
-    issue_title: str,
-    core_angle: str,
-    why_this_issue: str,
-    what_not_to_do: str,
+    issue_mode: str,
+    headline: str,
+    subhead: str,
+    golden_thread: str,
+    why_interesting: str,
+    editorial_warning: str,
     deep_results: str,
     landscape_results: str
 ) -> str:
     return f"""
 Today is {today}.
 
-You are writing a high-quality paid social operator newsletter.
+You are writing a high-quality paid social deep dive newsletter.
 
-This is not a generic marketing newsletter.
-This is not a company memo.
-This is not a fixed-format deep dive.
-This issue should follow the evidence and the selected issue shape.
+This should read like a sharp paid social essay, not a template.
+It should be specific, interesting, evidence-led, and useful.
 
-Issue shape:
-{issue_shape}
+Issue mode:
+{issue_mode}
 
-Issue title:
-{issue_title}
+Headline:
+{headline}
 
-Core angle:
-{core_angle}
+Subhead:
+{subhead}
 
-Why this issue was selected:
-{why_this_issue}
+Golden thread:
+{golden_thread}
 
-Obvious/generic angle to avoid:
-{what_not_to_do}
+Why this is interesting:
+{why_interesting}
 
-Raw targeted research:
+Editorial warning:
+{editorial_warning}
+
+Targeted research results:
 {deep_results}
 
 Earlier landscape results:
@@ -351,88 +334,151 @@ Private reader context:
 - They care about campaign decisions, creative testing, measurement quality, buyer behavior, platform automation, competitor patterns, and in-house team capability.
 - Relevant categories include enterprise tech, consumer tech, gaming, B2B demand generation, AI PCs, and performance media.
 
-Very important voice rules:
-- Do NOT write as if you are teaching the reader's company what to do.
-- Do NOT say “the team must,” “the company should,” “the brand needs to,” or similar.
-- Do NOT overuse any specific company name.
-- Do NOT make the output sound like an internal strategy memo directed at leadership.
-- Write like a smart external paid social newsletter: analytical, practical, sharp, and respectful.
-- Use phrases like “a useful takeaway,” “one practical implication,” “where this applies,” “worth testing,” “worth watching,” or “the operator lesson.”
-- Keep the tone confident but not prescriptive.
-- Make the reader feel smarter, not judged.
+Voice:
+- Write like a smart external paid social newsletter.
+- Do not sound like a corporate memo.
+- Do not teach any specific company what it “must” do.
+- Do not overuse company names.
+- Be analytical, plainspoken, and precise.
+- Make the reader feel like they learned something specific.
 
-Your goal:
-Write a useful, sharp, operator-grade research issue.
+Strict anti-generic rules:
+Do NOT write lines like:
+- "This can improve ROI."
+- "This requires a deep understanding of the technology and its limitations."
+- "Operators should monitor effectiveness."
+- "AI can optimize campaigns."
+- "This helps brands reach the right audience."
+- "Testing is important."
+- "Measurement is critical."
+- "Creative is key."
 
-The output should help the reader do at least one of these:
-- Think better about paid social strategy
-- Test better creative
-- Understand platform changes
-- Improve measurement judgment
-- Understand buyers better
-- Spot competitor patterns
-- Build a useful internal asset
-- Make better paid social decisions
+Every paragraph must include at least one of:
+- A concrete source detail
+- A specific mechanism
+- A specific tension or tradeoff
+- A named platform behavior
+- A real campaign/case detail
+- A buyer behavior detail
+- A measurement caveat
+- A non-obvious implication
 
-Rules:
-- Do not force sections that do not fit.
-- Do not force case studies if the case material is weak.
-- Do not force B2B, consumer, gaming, measurement, creative, and ops sections if only some are relevant.
-- Do not summarize every source one by one unless that is useful.
-- Do not overstate platform promotional case studies.
-- Mark paywalled or partially accessible sources clearly.
-- If evidence is thin, say so.
-- Prefer sharp judgment over completeness.
-- Be specific and practical.
-- Avoid generic marketing language.
-- Avoid corporate-sounding recommendations.
+Do not summarize sources one by one.
+Synthesize them into a narrative.
+
+If a source is promotional, say what can and cannot be learned from it.
+If evidence is thin, say so.
+Do not overclaim.
 
 Return ONLY valid JSON.
 
 {{
-  "issue_shape": "{issue_shape}",
-  "title": "{issue_title}",
-  "core_angle": "{core_angle}",
-  "opening": "Short 2-3 sentence setup explaining why this matters.",
-  "main_takeaway": "The one big idea the reader should remember.",
-  "what_was_found": [
+  "subject_line": "Email subject line under 70 characters",
+  "eyebrow": "Short label like Creative Analysis, Measurement Note, Case Teardown, etc.",
+  "title": "{headline}",
+  "subtitle": "{subhead}",
+  "publish_quality": "Strong | Medium | Thin",
+  "opening_hook": "A strong 2-3 sentence opening. It should create curiosity, not summarize the topic generically.",
+  "the_interesting_part": [
     {{
+      "section_title": "Specific section title",
+      "body": "A detailed paragraph with concrete details and actual insight. No generic filler."
+    }},
+    {{
+      "section_title": "Specific section title",
+      "body": "Another detailed paragraph that adds a new idea, not a repeat."
+    }},
+    {{
+      "section_title": "Specific section title",
+      "body": "Another detailed paragraph that adds a new idea, not a repeat."
+    }}
+  ],
+  "source_trail": [
+    {{
+      "title": "Source title",
       "source": "Source name",
       "date_or_recency": "Date or recency",
       "url": "URL",
-      "finding": "What was found",
-      "why_it_matters": "Why this matters for paid social"
+      "what_is_useful_here": "Specific detail from the source that is actually useful.",
+      "how_to_read_it": "How to interpret this source carefully."
     }}
   ],
-  "operator_lessons": [
-    "Practical lesson 1",
-    "Practical lesson 2",
-    "Practical lesson 3"
+  "operator_read": [
+    "A specific operator-level takeaway. Must be concrete and non-obvious.",
+    "A second operator-level takeaway that adds a different idea.",
+    "A third operator-level takeaway that adds a different idea."
   ],
-  "practical_implication": "Specific application for paid social operators. Keep this practical and avoid company-specific prescriptions.",
-  "what_to_test_or_monitor": [
-    "Specific test, question, or monitoring idea 1",
-    "Specific test, question, or monitoring idea 2"
+  "questions_worth_asking": [
+    "A sharp question this raises for paid social work.",
+    "A sharp question this raises for creative, measurement, platform, or buyer behavior.",
+    "A sharp question this raises for future research."
   ],
-  "what_not_to_overlearn": [
-    "Caveat or limitation 1",
-    "Caveat or limitation 2"
+  "what_not_to_overclaim": [
+    "Specific caveat or limitation.",
+    "Specific caveat or limitation."
   ],
-  "internal_asset_idea": "One useful asset this could become, if applicable.",
+  "read_this_first": {{
+    "title": "Best single source title",
+    "url": "URL",
+    "why": "Why this is the best place to start."
+  }},
   "best_links": [
     {{
       "title": "Title",
       "url": "URL"
     }}
-  ],
-  "subject_line": "Email subject line under 70 characters"
+  ]
 }}
+"""
+
+
+def build_refinement_prompt(draft_json: dict, deep_results: str) -> str:
+    draft_text = json.dumps(draft_json, ensure_ascii=False, indent=2)
+
+    return f"""
+You are editing a paid social newsletter draft.
+
+The previous reviewer feedback was:
+- The writing felt repetitive.
+- It sounded templatey.
+- The points were too basic.
+- Lines like "requires a deep understanding of the technology and its limitations" say nothing.
+- The final output needs actual depth, specific findings, and interesting material.
+
+Your job:
+Rewrite the draft JSON below so it becomes more specific, less repetitive, and more interesting.
+
+Draft JSON:
+{draft_text}
+
+Research evidence available:
+{deep_results}
+
+Editing rules:
+1. Remove generic lines.
+2. Every section must add a new idea.
+3. Do not repeat the main takeaway in different words.
+4. Add concrete mechanisms, examples, source details, tensions, or caveats wherever possible.
+5. If a point could apply to any paid social topic, rewrite it or remove it.
+6. Do not add unsupported claims.
+7. Keep the same JSON schema.
+8. Keep the tone like a sharp external paid social newsletter.
+9. Do not make it sound company-specific.
+10. Do not use corporate phrases like "must prioritize," "leverage," "unlock," "drive ROI," or "deep understanding."
+
+Return ONLY valid JSON using the exact same schema as the draft.
 """
 
 
 # ── Research functions ────────────────────────────────────────────────────────
 
-def search_batch(queries: list, max_results: int = 5, label: str = "") -> str:
+def search_batch(
+    queries: list,
+    max_results: int = 5,
+    label: str = "",
+    include_raw_content: bool = False,
+    body_limit: int = 900
+) -> str:
     tavily = TavilyClient(api_key=TAVILY_API_KEY)
     seen_urls = set()
     results = []
@@ -443,14 +489,14 @@ def search_batch(queries: list, max_results: int = 5, label: str = "") -> str:
             continue
 
         tag = f"[{label} {i}/{len(queries)}]" if label else f"[{i}/{len(queries)}]"
-        print(f"  {tag} {q[:90]}...")
+        print(f"  {tag} {q[:95]}...")
 
         try:
             response = tavily.search(
                 q,
                 search_depth="advanced",
                 max_results=max_results,
-                include_raw_content=False
+                include_raw_content=include_raw_content
             )
 
             for item in response.get("results", []):
@@ -462,14 +508,17 @@ def search_batch(queries: list, max_results: int = 5, label: str = "") -> str:
 
                 title = item.get("title", "")
                 published_date = item.get("published_date", "unknown")
-                content = item.get("content", "")
+
+                raw_content = item.get("raw_content") or ""
+                snippet_content = item.get("content") or ""
+                content = raw_content if raw_content else snippet_content
 
                 results.append(
                     f"QUERY: {q}\n"
                     f"TITLE: {title}\n"
                     f"URL: {url}\n"
                     f"DATE: {published_date}\n"
-                    f"BODY: {compact_text(content, 650)}\n"
+                    f"BODY: {compact_text(content, body_limit)}\n"
                     f"---"
                 )
 
@@ -483,41 +532,36 @@ def search_batch(queries: list, max_results: int = 5, label: str = "") -> str:
 
 def fallback_discovery_queries() -> list:
     return [
-        "latest paid social advertising platform updates Meta LinkedIn Reddit TikTok Google Ads",
-        "AI automation advertising paid social campaign management creative optimization",
-        "paid social measurement attribution incrementality MMM research report",
-        "B2B buyer behavior enterprise technology marketing research report",
-        "paid social creative testing case study campaign teardown",
-        "HP Lenovo Apple Microsoft AI PC advertising campaign messaging",
-        "LinkedIn Ads Reddit Ads Meta Ads B2B case study campaign results",
-        "AdExchanger Digiday Marketing Brew paid social AI advertising automation",
-        "Think with Google IAB WARC Effie advertising effectiveness case study digital media",
-        "paid social practitioner teardown LinkedIn Meta Reddit creative measurement"
+        "paid social case study with results creative testing B2B technology",
+        "paid social advertising teardown B2B creative measurement case study",
+        "site:thinkwithgoogle.com advertising effectiveness case study paid social technology",
+        "site:business.linkedin.com B2B Institute paid social creative measurement research",
+        "site:effie.org technology advertising case study effectiveness digital media",
+        "site:warc.com paid social effectiveness case study technology marketing",
+        "site:business.reddit.com success stories technology B2B paid media",
+        "AI creative testing advertising case study CRM buyer language",
+        "paid social incrementality attribution geo lift case study",
+        "HP Lenovo Apple Microsoft AI PC advertising campaign messaging analysis",
+        "B2B buyer behavior enterprise technology digital advertising research",
+        "in-house media buying paid social operating model case study"
     ]
 
 
-# ── Email HTML ────────────────────────────────────────────────────────────────
+# ── HTML rendering ────────────────────────────────────────────────────────────
 
-def bullet_list(items: list, color: str = "#374151") -> str:
-    items = [i for i in safe_list(items) if str(i).strip()]
-    if not items:
-        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No strong points included this cycle.</p>'
-
-    return (
-        "<ul style='margin:0;padding-left:18px;'>"
-        + "".join(
-            f'<li style="margin-bottom:8px;font-size:13.5px;color:{color};line-height:1.7;">{esc(i)}</li>'
-            for i in items
-        )
-        + "</ul>"
-    )
+def paragraph(text: str, color: str = "#374151", size: str = "14px") -> str:
+    return f"""
+<p style="margin:0 0 13px;font-size:{size};line-height:1.75;color:{color};">
+  {esc(text)}
+</p>
+"""
 
 
 def section(label: str, content: str, bg: str = "#FFFFFF") -> str:
     return f"""
 <tr>
-  <td style="background:{bg};padding:22px 26px;border-bottom:1px solid #F3F4F6;">
-    <p style="margin:0 0 12px;font-size:10.5px;font-weight:800;color:#9CA3AF;
+  <td style="background:{bg};padding:24px 28px;border-bottom:1px solid #F3F4F6;">
+    <p style="margin:0 0 13px;font-size:10.5px;font-weight:800;color:#9CA3AF;
               text-transform:uppercase;letter-spacing:1px;">{esc(label)}</p>
     {content}
   </td>
@@ -525,44 +569,90 @@ def section(label: str, content: str, bg: str = "#FFFFFF") -> str:
 """
 
 
-def finding_block(item: dict) -> str:
-    source = esc(item.get("source", ""))
-    date = esc(item.get("date_or_recency", ""))
-    url = clean_url(item.get("url", "#"))
-    finding = esc(item.get("finding", ""))
-    why = esc(item.get("why_it_matters", ""))
+def bullet_list(items: list, color: str = "#374151") -> str:
+    items = [i for i in safe_list(items) if str(i).strip()]
+    if not items:
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No items included.</p>'
 
-    return f"""
+    return (
+        "<ul style='margin:0;padding-left:19px;'>"
+        + "".join(
+            f'<li style="margin-bottom:9px;font-size:13.5px;color:{color};line-height:1.7;">{esc(i)}</li>'
+            for i in items
+        )
+        + "</ul>"
+    )
+
+
+def interesting_sections_html(items: list) -> str:
+    items = [i for i in safe_list(items) if isinstance(i, dict)]
+    if not items:
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No sections included.</p>'
+
+    html = ""
+
+    for item in items:
+        title = item.get("section_title", "")
+        body = item.get("body", "")
+
+        html += f"""
+<div style="margin-bottom:20px;">
+  <h3 style="margin:0 0 8px;font-size:16px;line-height:1.35;color:#111827;">
+    {esc(title)}
+  </h3>
+  {paragraph(body)}
+</div>
+"""
+
+    return html
+
+
+def source_trail_html(items: list) -> str:
+    items = [i for i in safe_list(items) if isinstance(i, dict)]
+    if not items:
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No source trail included.</p>'
+
+    html = ""
+
+    for item in items:
+        title = item.get("title", "")
+        source = item.get("source", "")
+        date = item.get("date_or_recency", "")
+        url = clean_url(item.get("url", "#"))
+        useful = item.get("what_is_useful_here", "")
+        how = item.get("how_to_read_it", "")
+
+        html += f"""
 <div style="padding:15px 0;border-bottom:1px solid #E5E7EB;">
-  <p style="margin:0 0 4px;font-size:12px;color:#6B7280;">
-    <strong>{source}</strong>{' · ' if source and date else ''}{date}
+  <p style="margin:0 0 5px;font-size:12px;color:#6B7280;">
+    <strong>{esc(source)}</strong>{' · ' if source and date else ''}{esc(date)}
   </p>
-  <p style="margin:0 0 8px;font-size:13.5px;line-height:1.65;color:#111827;">
-    {finding}
+
+  <p style="margin:0 0 7px;font-size:14px;line-height:1.55;color:#111827;font-weight:700;">
+    <a href="{esc(url)}" style="color:#111827;text-decoration:none;">{esc(title)}</a>
   </p>
-  <p style="margin:0 0 8px;font-size:13px;line-height:1.65;color:#4B5563;">
-    <strong>Why it matters:</strong> {why}
+
+  <p style="margin:0 0 7px;font-size:13.5px;line-height:1.65;color:#374151;">
+    <strong>Useful detail:</strong> {esc(useful)}
   </p>
+
+  <p style="margin:0 0 8px;font-size:13px;line-height:1.65;color:#6B7280;">
+    <strong>How to read it:</strong> {esc(how)}
+  </p>
+
   <p style="margin:0;font-size:12.5px;">
     <a href="{esc(url)}" style="color:#2563EB;text-decoration:none;">Read source →</a>
   </p>
 </div>
 """
 
-
-def findings_html(items: list) -> str:
-    items = safe_list(items)
-    if not items:
-        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No strong evidence found this cycle.</p>'
-
-    return "".join(finding_block(i) for i in items if isinstance(i, dict))
+    return html
 
 
 def links_html(items: list) -> str:
-    items = safe_list(items)
-    clean_items = [i for i in items if isinstance(i, dict) and i.get("url")]
+    items = [i for i in safe_list(items) if isinstance(i, dict) and i.get("url")]
 
-    if not clean_items:
+    if not items:
         return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No links included.</p>'
 
     return (
@@ -571,10 +661,26 @@ def links_html(items: list) -> str:
             f'<li style="margin-bottom:8px;font-size:13px;line-height:1.6;">'
             f'<a href="{esc(clean_url(i.get("url")))}" style="color:#2563EB;text-decoration:none;">'
             f'{esc(i.get("title", i.get("url")))}</a></li>'
-            for i in clean_items
+            for i in items
         )
         + "</ul>"
     )
+
+
+def read_this_first_html(item: dict) -> str:
+    if not isinstance(item, dict) or not item.get("url"):
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No single best link selected.</p>'
+
+    return f"""
+<p style="margin:0 0 8px;font-size:14px;font-weight:700;line-height:1.5;color:#111827;">
+  <a href="{esc(clean_url(item.get("url")))}" style="color:#111827;text-decoration:none;">
+    {esc(item.get("title", "Read this source"))}
+  </a>
+</p>
+<p style="margin:0;font-size:13.5px;line-height:1.7;color:#374151;">
+  {esc(item.get("why", ""))}
+</p>
+"""
 
 
 def build_html(data: dict) -> str:
@@ -582,35 +688,28 @@ def build_html(data: dict) -> str:
     date_str = now.strftime("%B %d, %Y")
     week_num = now.isocalendar()[1]
 
+    eyebrow = data.get("eyebrow", "Deep Read")
     title = data.get("title", "Paid Social Edge")
-    issue_shape = data.get("issue_shape", "Research Issue")
-    core_angle = data.get("core_angle", "")
+    subtitle = data.get("subtitle", "")
+    publish_quality = data.get("publish_quality", "")
+    opening_hook = data.get("opening_hook", "")
 
-    opening = data.get("opening", "")
-    main_takeaway = data.get("main_takeaway", "")
-    practical_implication = data.get("practical_implication", "")
-    internal_asset = data.get("internal_asset_idea", "")
+    interesting_part = data.get("the_interesting_part", [])
+    source_trail = data.get("source_trail", [])
+    operator_read = data.get("operator_read", [])
+    questions = data.get("questions_worth_asking", [])
+    caveats = data.get("what_not_to_overclaim", [])
+    read_first = data.get("read_this_first", {})
+    best_links = data.get("best_links", [])
 
-    findings = data.get("what_was_found", [])
-    lessons = data.get("operator_lessons", [])
-    tests = data.get("what_to_test_or_monitor", [])
-    caveats = data.get("what_not_to_overlearn", [])
-    links = data.get("best_links", [])
+    opening_html = paragraph(opening_hook, "#374151", "14.5px")
 
-    opening_html = f"""
-<p style="margin:0;font-size:14px;line-height:1.75;color:#374151;">{esc(opening)}</p>
-"""
-
-    takeaway_html = f"""
-<p style="margin:0;font-size:15px;line-height:1.75;color:#065F46;font-weight:700;">{esc(main_takeaway)}</p>
-"""
-
-    implication_html = f"""
-<p style="margin:0;font-size:13.5px;line-height:1.75;color:#1E3A8A;">{esc(practical_implication)}</p>
-"""
-
-    asset_html = f"""
-<p style="margin:0;font-size:13.5px;line-height:1.75;color:#92400E;">{esc(internal_asset)}</p>
+    quality_note = ""
+    if publish_quality:
+        quality_note = f"""
+<p style="margin:10px 0 0;font-size:11px;color:#A7F3D0;letter-spacing:.4px;text-transform:uppercase;font-weight:700;">
+  Source bar: {esc(publish_quality)}
+</p>
 """
 
     return f"""<!DOCTYPE html>
@@ -625,46 +724,47 @@ def build_html(data: dict) -> str:
 <table width="100%" bgcolor="#F3F4F6" style="background:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <tr>
     <td align="center" style="padding:32px 16px;">
-      <table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;">
+      <table width="660" cellpadding="0" cellspacing="0" style="max-width:660px;width:100%;">
 
         <tr>
-          <td style="background:#064E3B;border-radius:14px 14px 0 0;padding:34px 36px 30px;" bgcolor="#064E3B">
-            <p style="margin:0 0 8px;font-size:10px;font-weight:800;letter-spacing:2.3px;color:#6EE7B7;text-transform:uppercase;">
+          <td style="background:#111827;border-radius:14px 14px 0 0;padding:34px 38px 30px;" bgcolor="#111827">
+            <p style="margin:0 0 8px;font-size:10px;font-weight:800;letter-spacing:2.3px;color:#93C5FD;text-transform:uppercase;">
               Paid Social Edge · Week {week_num} · {esc(date_str)}
             </p>
 
-            <p style="margin:0 0 10px;font-size:11px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:1px;">
-              {esc(issue_shape)}
+            <p style="margin:0 0 10px;font-size:11px;font-weight:800;color:#6EE7B7;text-transform:uppercase;letter-spacing:1px;">
+              {esc(eyebrow)}
             </p>
 
-            <h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;font-weight:850;color:#FFFFFF;">
+            <h1 style="margin:0 0 14px;font-size:25px;line-height:1.24;font-weight:850;color:#FFFFFF;">
               {esc(title)}
             </h1>
 
-            <p style="margin:0;font-size:14px;line-height:1.65;color:#D1FAE5;">
-              {esc(core_angle)}
+            <p style="margin:0;font-size:14.5px;line-height:1.65;color:#D1D5DB;">
+              {esc(subtitle)}
             </p>
+
+            {quality_note}
           </td>
         </tr>
 
         <tr>
-          <td style="background:#10B981;height:4px;"></td>
+          <td style="background:#2563EB;height:4px;"></td>
         </tr>
 
-        {section("Why this matters", opening_html)}
-        {section("Main takeaway", takeaway_html, "#ECFDF5")}
-        {section("What was found", findings_html(findings))}
-        {section("Operator lessons", bullet_list(lessons), "#FAFAFA")}
-        {section("Practical implication", implication_html, "#EFF6FF")}
-        {section("What to test or monitor", bullet_list(tests, "#065F46"))}
-        {section("What not to overlearn", bullet_list(caveats, "#991B1B"), "#FEF2F2")}
-        {section("Internal asset idea", asset_html, "#FEF3C7")}
-        {section("Best links", links_html(links))}
+        {section("Opening", opening_html)}
+        {section("The interesting part", interesting_sections_html(interesting_part), "#FAFAFA")}
+        {section("Source trail", source_trail_html(source_trail))}
+        {section("Operator read", bullet_list(operator_read), "#F9FAFB")}
+        {section("Questions worth asking", bullet_list(questions, "#1E3A8A"), "#EFF6FF")}
+        {section("What not to overclaim", bullet_list(caveats, "#991B1B"), "#FEF2F2")}
+        {section("Read this first", read_this_first_html(read_first), "#ECFDF5")}
+        {section("Best links", links_html(best_links))}
 
         <tr>
           <td style="background:#111827;border-radius:0 0 14px 14px;padding:18px 36px;text-align:center;" bgcolor="#111827">
             <p style="margin:0;font-size:12px;color:#9CA3AF;">
-              Paid Social Edge · Evidence-led research for paid social operators
+              Paid Social Edge · Source-led research for paid social operators
             </p>
           </td>
         </tr>
@@ -686,6 +786,7 @@ def send_email(html: str, subject: str):
         subs = json.load(f)
 
     emails = subs.get("emails", [])
+
     if not emails:
         print("No subscribers found.")
         return
@@ -701,6 +802,7 @@ def send_email(html: str, subject: str):
                 "subject": subject,
                 "html": html
             })
+
             print(f"  Sent: {email}")
             sent += 1
             time.sleep(0.2)
@@ -719,14 +821,16 @@ def main():
 
     today = datetime.now(CST).strftime("%B %d, %Y")
 
-    print("\n[Phase 1] Generating diverse discovery queries...")
+    print("\n[Phase 1] Generating discovery queries...")
     query_prompt = build_discovery_query_prompt(today)
 
     try:
-        query_data = call_groq(query_prompt, max_tokens=900, temperature=0.45)
+        query_data = call_groq(query_prompt, max_tokens=1100, temperature=0.55)
         discovery_queries = query_data.get("queries", [])
+
         if not discovery_queries:
             raise ValueError("No queries returned by model.")
+
     except Exception as e:
         print(f"  Query generation failed, using fallback queries. Error: {e}")
         discovery_queries = fallback_discovery_queries()
@@ -736,64 +840,93 @@ def main():
         print(f"  - {q}")
 
     print("\n[Phase 2] Broad discovery search...")
-    landscape_raw = search_batch(discovery_queries, max_results=4, label="Discovery")
+    landscape_raw = search_batch(
+        discovery_queries,
+        max_results=4,
+        label="Discovery",
+        include_raw_content=False,
+        body_limit=850
+    )
 
     if not landscape_raw.strip():
         raise RuntimeError("No search results returned from Tavily.")
 
-    print("\n[Phase 3] Selecting issue shape and angle from evidence...")
+    print("\n[Phase 3] Selecting golden thread from evidence...")
     time.sleep(5)
 
-    selection_prompt = build_issue_selection_prompt(
+    selection_prompt = build_story_selection_prompt(
         today=today,
-        landscape_results=landscape_raw[:10000]
+        landscape_results=landscape_raw[:12000]
     )
 
-    selection = call_groq(selection_prompt, max_tokens=1400, temperature=0.25)
+    selection = call_groq(selection_prompt, max_tokens=1700, temperature=0.25)
 
-    issue_shape = selection.get("issue_shape", "Research Issue")
-    issue_title = selection.get("issue_title", "Paid Social Edge")
-    core_angle = selection.get("core_angle", "")
-    why_this_issue = selection.get("why_this_issue", "")
-    what_not_to_do = selection.get("what_not_to_do", "")
+    issue_mode = selection.get("issue_mode", "Deep Read")
+    headline = selection.get("headline", "Paid Social Edge")
+    subhead = selection.get("subhead", "")
+    golden_thread = selection.get("golden_thread", "")
+    why_interesting = selection.get("why_this_is_interesting", "")
+    editorial_warning = selection.get("editorial_warning", "")
     targeted_queries = selection.get("targeted_search_queries", [])
 
     if not targeted_queries:
-        targeted_queries = discovery_queries[:5]
+        targeted_queries = discovery_queries[:6]
 
-    print(f"\nSelected issue shape: {issue_shape}")
-    print(f"Selected title: {issue_title}")
-    print(f"Core angle: {core_angle}")
-    print(f"Why this issue: {why_this_issue}")
-    print(f"Avoiding: {what_not_to_do}")
+    print(f"\nIssue mode: {issue_mode}")
+    print(f"Headline: {headline}")
+    print(f"Golden thread: {golden_thread}")
+    print(f"Source bar: {selection.get('source_bar', 'unknown')}")
+    print(f"Editorial warning: {editorial_warning}")
 
-    print("\n[Phase 4] Targeted follow-up search...")
+    print("\n[Phase 4] Targeted deep search with raw content...")
     time.sleep(5)
-    deep_raw = search_batch(targeted_queries, max_results=4, label="Targeted")
 
-    print("\n[Phase 5] Writing final research issue...")
-    time.sleep(8)
-
-    writer_prompt = build_issue_writer_prompt(
-        today=today,
-        issue_shape=issue_shape,
-        issue_title=issue_title,
-        core_angle=core_angle,
-        why_this_issue=why_this_issue,
-        what_not_to_do=what_not_to_do,
-        deep_results=deep_raw[:9000],
-        landscape_results=landscape_raw[:3500]
+    deep_raw = search_batch(
+        targeted_queries,
+        max_results=5,
+        label="Deep",
+        include_raw_content=True,
+        body_limit=2400
     )
 
-    data = call_groq(writer_prompt, max_tokens=2600, temperature=0.25)
+    if not deep_raw.strip():
+        print("No targeted results returned. Falling back to landscape material.")
+        deep_raw = landscape_raw
 
-    subject = data.get("subject_line") or f"Paid Social Edge: {data.get('title', issue_title)}"
+    print("\n[Phase 5] Writing article-style deep dive...")
+    time.sleep(8)
+
+    writer_prompt = build_writer_prompt(
+        today=today,
+        issue_mode=issue_mode,
+        headline=headline,
+        subhead=subhead,
+        golden_thread=golden_thread,
+        why_interesting=why_interesting,
+        editorial_warning=editorial_warning,
+        deep_results=deep_raw[:16000],
+        landscape_results=landscape_raw[:5000]
+    )
+
+    draft = call_groq(writer_prompt, max_tokens=3600, temperature=0.28)
+
+    print("\n[Phase 6] Refining to remove generic/template writing...")
+    time.sleep(5)
+
+    refinement_prompt = build_refinement_prompt(
+        draft_json=draft,
+        deep_results=deep_raw[:14000]
+    )
+
+    data = call_groq(refinement_prompt, max_tokens=3600, temperature=0.22)
+
+    subject = data.get("subject_line") or f"Paid Social Edge: {data.get('title', headline)}"
     subject = compact_text(subject, 70)
 
     html = build_html(data)
 
     print(f"\nSubject: {subject}")
-    print("[Phase 6] Sending email...")
+    print("[Phase 7] Sending email...")
     send_email(html, subject)
 
 
