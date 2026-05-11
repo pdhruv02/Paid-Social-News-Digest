@@ -1,21 +1,26 @@
 """
-Paid Social Edge — Open-Ended Curator Newsletter
+Paid Social Edge — Article-Led Deep Dive Newsletter
+Runs on odd ISO weeks, Tuesday 6 AM CST
 
-Core idea:
-Find one genuinely interesting thing from advertising / paid social / brand stories /
-creative effectiveness / buyer behavior / measurement / platform shifts / campaign history,
-then write one short article about it.
+Core logic:
+Phase 1: AI generates broad discovery queries
+Phase 2: Tavily searches broadly
+Phase 3: AI finds one strong editorial angle / golden thread
+Phase 4: Tavily does targeted deep research with raw content
+Phase 5: AI writes one article-style newsletter
+Phase 6: AI edits the article to remove generic/template writing
+Phase 7: Email is sent via Resend
 
-Output format:
-1. Title
-2. Subtitle
-3. Article body
-4. Main source link
+Design principle:
+No fixed newsletter sections except:
+1. Header
+2. Article body
+3. Sources
 
-No fixed newsletter sections.
-No forced lessons.
-No forced "what to test."
-No forced Dell/company-specific recommendations.
+No forced “operator lessons.”
+No forced “what to test.”
+No forced “practical implication.”
+No forced “what not to overlearn.”
 """
 
 from tavily import TavilyClient
@@ -42,7 +47,7 @@ SUBSCRIBERS_FILE = "subscribers.json"
 MODEL            = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 CST              = pytz.timezone("US/Central")
 
-# Set RUN_ODD_WEEKS_ONLY=true in GitHub Actions if this deep-dive runs only on odd weeks.
+# Set RUN_ODD_WEEKS_ONLY=true in GitHub Actions if you want odd-week gating.
 RUN_ODD_WEEKS_ONLY = os.environ.get("RUN_ODD_WEEKS_ONLY", "false").lower() == "true"
 
 
@@ -51,11 +56,11 @@ RUN_ODD_WEEKS_ONLY = os.environ.get("RUN_ODD_WEEKS_ONLY", "false").lower() == "t
 def check_week():
     week = datetime.now(CST).isocalendar()[1]
 
-   # if RUN_ODD_WEEKS_ONLY and week % 2 == 0:
-    #    print(f"Week {week} is even — skipping this deep-dive run.")
-     #   exit(0)
+    if RUN_ODD_WEEKS_ONLY and week % 2 == 0:
+        print(f"Week {week} is even — skipping this deep dive run.")
+        exit(0)
 
-    print(f"Week {week} — running Paid Social Edge curator issue.")
+    print(f"Week {week} — running Paid Social Edge deep dive.")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,6 +75,14 @@ def clean_url(url: str) -> str:
     if not url:
         return "#"
     return str(url).strip()
+
+
+def safe_list(value):
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return []
+    return [str(value)]
 
 
 def compact_text(text: str, max_chars: int) -> str:
@@ -94,7 +107,7 @@ def extract_json(raw: str) -> dict:
     return json.loads(match.group())
 
 
-def call_groq(prompt: str, max_tokens: int = 2200, temperature: float = 0.35) -> dict:
+def call_groq(prompt: str, max_tokens: int = 2400, temperature: float = 0.25) -> dict:
     groq_client = Groq(api_key=GROQ_API_KEY)
 
     for attempt in range(3):
@@ -131,63 +144,50 @@ def call_groq(prompt: str, max_tokens: int = 2200, temperature: float = 0.35) ->
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
-def build_scout_query_prompt(today: str) -> str:
+def build_discovery_query_prompt(today: str) -> str:
     return f"""
 Today is {today}.
 
-You are creating search queries for an open-ended advertising and paid social curator newsletter.
+You are generating discovery search queries for a high-quality paid social deep dive newsletter.
 
-The goal is NOT to cover a predefined topic.
-The goal is to discover one genuinely interesting thing worth writing about.
+Private reader context:
+- The reader works in paid social at a large technology company.
+- They care about strategy, creative testing, measurement, attribution, platform automation, B2B buyer behavior, competitor messaging, AI workflows, and in-house media operations.
+- Relevant areas include enterprise tech, consumer tech, gaming, AI PCs, B2B demand generation, and performance media.
 
-The reader works in paid social at a large technology company, but the newsletter should NOT sound company-specific.
-Use that context only to judge relevance.
+This context is only for relevance filtering.
+The newsletter should NOT sound company-specific.
 
-Look broadly across:
-- great advertising stories
-- real company and brand stories
-- detailed campaign case studies
-- famous ads from history
-- modern ad experiments
-- paid social strategy
-- creative effectiveness
-- marketing science
-- measurement and attribution
-- platform changes
-- AI and automation in advertising
-- buyer behavior
-- competitor messaging
-- B2B and consumer tech campaigns
-- unusual examples from adjacent industries
-- practitioner teardowns
-- research reports
-
-A good query should help uncover something with:
-- a real story
-- a surprising detail
-- a specific mechanism
-- a useful tension
-- a mistake operators can learn from
-- a campaign mechanic worth studying
-- a buyer behavior insight
-- a measurement caveat
-- a creative strategy lesson
-- a source worth reading
+Goal:
+Find rare, useful, specific source material that could become an interesting paid social article.
 
 Avoid generic searches like:
 - paid social trends
 - AI marketing best practices
 - how to improve ROI with ads
-- social media marketing tips
 
-Prioritize credible sources when useful:
-Effie, WARC, IPA, Think with Google, YouTube Works, LinkedIn B2B Institute,
-Reddit for Business, Meta for Business, TikTok Business, IAB, AdExchanger,
-Digiday, Marketing Brew, eMarketer, The Information, Harvard Business Review,
-Stratechery, Lenny's Newsletter, Exit Five, Marketing Examples, Ads of the World,
-Contagious, Campaign, The Drum, and strong practitioner teardowns.
+Search for material likely to contain:
+- specific campaign mechanics
+- detailed case studies
+- advertising effectiveness examples
+- creative testing systems
+- measurement caveats
+- buyer behavior research
+- competitor messaging patterns
+- practitioner teardowns
+- platform automation shifts
+- in-house media operating lessons
 
-Also consider public ad libraries, campaign pages, brand pages, landing pages, YouTube channels, and competitor examples.
+Include a mix of:
+- broad discovery queries
+- source-specific queries
+- case-study queries
+- research/report queries
+- competitor/message queries
+- measurement/creative queries
+
+Useful sources may include:
+Effie, WARC, IPA, Think with Google, LinkedIn B2B Institute, Reddit for Business, Meta for Business, TikTok Business, YouTube Works, IAB, AdExchanger, Digiday, Marketing Brew, eMarketer, and credible practitioner teardown sources.
 
 Return ONLY valid JSON.
 
@@ -210,158 +210,199 @@ Return ONLY valid JSON.
 """
 
 
-def build_find_selection_prompt(today: str, scout_results: str) -> str:
+def build_story_selection_prompt(today: str, landscape_results: str) -> str:
     return f"""
 Today is {today}.
 
-You are the curator of a high-quality advertising and paid social newsletter.
+You are the editor of a paid social deep dive newsletter.
 
-Your job:
-From the research results below, find ONE genuinely interesting thing worth writing about.
+Your job is NOT to choose a broad topic.
+Your job is to find one strong editorial angle from the research results.
 
-Do not choose a broad topic.
-Do not choose something because it is trendy.
-Do not choose something because it has many sources.
-Choose one specific story, source, finding, campaign, case, platform shift, creative idea, measurement issue, or business detail that is actually worth reading.
+A good issue should feel like:
+- a sharp paid social essay
+- a field note from useful research
+- a source-led analysis
+- a thoughtful teardown
+- a specific idea worth reading
 
-The newsletter should feel like:
-"I found this one interesting thing. Here's the story, why it matters, and what it quietly teaches about advertising or paid social."
-
-Raw research results:
-{scout_results}
-
-The find can be about:
-- a brand's real story
-- an epic ad or campaign from history
-- a modern campaign with interesting mechanics
-- a case study with actual detail
-- a paid social experiment
-- a creative testing idea
-- a platform change with second-order effects
-- a measurement mistake or caveat
-- a buyer behavior insight
-- a competitor messaging pattern
-- a practitioner teardown
-- a research report with a surprising finding
-- something outside paid social that still teaches paid social thinking
-
-Avoid:
+A bad issue feels like:
+- a template
 - generic best practices
-- surface-level platform case studies
-- "AI improves ROI" type angles
-- generic trend summaries
-- broad topics with no story
-- anything that sounds like filler
+- a broad trend summary
+- “AI improves ROI”
+- “creative testing matters”
+- “measurement is important”
+- “B2B buyers need trust”
 
-Selection standard:
-A strong find should have at least one concrete detail that makes it worth writing about.
+Raw discovery results:
+{landscape_results}
+
+Private reader context:
+- The reader works in paid social at a large technology company.
+- They care about practical paid social judgment, not generic marketing commentary.
+- Relevant areas include B2B, consumer tech, gaming, AI PCs, creative testing, measurement, platform automation, buyer behavior, competitor messaging, and in-house media operations.
+
+Editorial standard:
+Choose an angle only if the source material gives you something specific to say.
+
+A strong angle might come from:
+- one unusually detailed case study
+- a tension across multiple sources
+- a competitor messaging pattern
+- a measurement caveat that operators miss
+- a platform change with second-order consequences
+- a buyer behavior finding with practical implications
+- a creative testing system with actual mechanics
+- a campaign detail that reveals a bigger lesson
+
+Do NOT force a case study.
+Do NOT force a platform update.
+Do NOT force a brand/company-specific angle.
+Do NOT write about the broadest topic just because it has the most sources.
 
 Return ONLY valid JSON.
 
 {{
   "should_publish": true,
-  "find_title": "A short description of the chosen find",
-  "article_angle": "The specific angle the article should explore",
-  "why_this_is_worth_reading": "Why this is interesting and not generic",
-  "main_source_title": "Best main source title",
-  "main_source_url": "Best main source URL",
-  "main_source_type": "Case study | Article | Research report | Campaign page | Teardown | Platform source | Other",
-  "source_strength": "Strong | Medium | Thin",
-  "what_to_avoid": "What would make the article boring or generic",
-  "followup_queries": [
-    "5 to 8 search queries to deepen this exact find, not the broad category"
+  "headline": "Specific headline, not a generic topic",
+  "subhead": "One sentence explaining the sharp angle",
+  "golden_thread": "The specific insight this issue will explore",
+  "why_this_is_interesting": "Why this is worth reading and not generic",
+  "source_bar": "Strong | Medium | Thin",
+  "editorial_warning": "What the writer must avoid so the issue does not become generic",
+  "best_seed_sources": [
+    {{
+      "title": "Source title",
+      "source": "Source name",
+      "url": "URL",
+      "date_or_recency": "Date or recency",
+      "specific_detail": "The concrete detail that makes this source useful"
+    }}
+  ],
+  "targeted_search_queries": [
+    "5 to 8 queries that deepen this exact angle, not the broad topic"
   ]
 }}
 """
 
 
-def build_article_prompt(
+def build_writer_prompt(
     today: str,
-    find_title: str,
-    article_angle: str,
-    why_worth_reading: str,
-    main_source_title: str,
-    main_source_url: str,
-    source_strength: str,
-    what_to_avoid: str,
+    headline: str,
+    subhead: str,
+    golden_thread: str,
+    why_interesting: str,
+    editorial_warning: str,
     deep_results: str,
-    scout_results: str
+    landscape_results: str
 ) -> str:
     return f"""
 Today is {today}.
 
-You are writing one article-style email for a high-quality advertising and paid social newsletter.
+You are writing a high-quality paid social deep dive newsletter.
 
-This should NOT feel like a template.
-There should be no fixed sections like "operator lessons," "what to test," "practical implications," or "key takeaways."
+This should read like one sharp article, not a template.
 
-The chosen find:
-{find_title}
+Headline:
+{headline}
 
-Article angle:
-{article_angle}
+Subhead:
+{subhead}
 
-Why this is worth reading:
-{why_worth_reading}
+Golden thread:
+{golden_thread}
 
-Main source:
-{main_source_title}
-{main_source_url}
+Why this is interesting:
+{why_interesting}
 
-Source strength:
-{source_strength}
+Editorial warning:
+{editorial_warning}
 
-What to avoid:
-{what_to_avoid}
-
-Deep research results:
+Targeted research results:
 {deep_results}
 
-Earlier scout results:
-{scout_results}
+Earlier landscape results:
+{landscape_results}
 
 Private reader context:
 - The reader works in paid social at a large technology company.
-- They care about advertising, paid social, creative, measurement, buyer behavior, platform shifts, competitor messaging, and useful marketing stories.
-- Do not make the article company-specific.
-- Do not teach any specific company what it should do.
+- They care about campaign decisions, creative testing, measurement quality, buyer behavior, platform automation, competitor patterns, and in-house team capability.
+- Relevant areas include enterprise tech, consumer tech, gaming, B2B demand generation, AI PCs, and performance media.
 
-Write like:
-"I found this interesting thing. Here's the story, why it is interesting, and what it quietly teaches about advertising or paid social."
+Voice:
+- Write like a smart external paid social newsletter.
+- Plainspoken, analytical, specific.
+- Not a corporate memo.
+- Not a strategy recommendation to any specific company.
+- Not a list of generic best practices.
+- Make the reader feel like they found something worth thinking about.
 
-Tone:
-- smart
-- plainspoken
-- specific
-- curious
-- not corporate
-- not generic
-- not over-explained
-- not buzzwordy
+Strict anti-generic rules:
+Do NOT write lines like:
+- "This can improve ROI."
+- "This requires a deep understanding of the technology and its limitations."
+- "AI can optimize campaigns."
+- "Testing is important."
+- "Measurement is critical."
+- "Creative is key."
+- "Operators should monitor performance."
+- "Brands need to understand their audience."
 
-Hard rules:
-- Do not write generic lines like "this improves ROI," "testing is important," "brands need to understand audiences," or "measurement is critical."
-- Do not write repeated takeaways in different words.
-- Do not force advice.
-- Do not include bullet points unless the article genuinely needs them.
-- The body should be 600 to 950 words.
-- Use paragraphs.
-- Include concrete details from sources.
-- If the evidence is thin, be honest and write a shorter article.
-- Do not invent facts.
-- If the main source is promotional, say how to read it carefully.
-- End naturally. Do not add a forced conclusion section.
+Every article block must contain at least one of:
+- a concrete source detail
+- a specific mechanism
+- a specific tension or tradeoff
+- a named platform behavior
+- a real campaign/case detail
+- a buyer behavior detail
+- a measurement caveat
+- a non-obvious implication
+
+Structure:
+- Write 4 to 6 article blocks.
+- Choose the headings naturally based on the story.
+- Do NOT use recurring generic headings like “Operator Lessons,” “Practical Implication,” “What to Test,” or “Key Takeaways.”
+- Each block must add a new idea.
+- If the evidence is thin, write fewer blocks and be honest.
+- Do not summarize sources one by one unless the article needs it.
+- Synthesize the sources into one coherent read.
 
 Return ONLY valid JSON.
 
 {{
   "subject_line": "Email subject line under 70 characters",
-  "title": "Article title",
-  "subtitle": "One-sentence subtitle",
-  "body": "Full article body with paragraphs separated by blank lines. No markdown headings unless truly needed.",
-  "main_source_title": "{main_source_title}",
-  "main_source_url": "{main_source_url}",
-  "source_note": "One sentence on why this source is worth reading or how to read it carefully."
+  "eyebrow": "Short label, e.g. Creative Analysis, Measurement Note, Case Teardown, Platform Shift",
+  "title": "{headline}",
+  "subtitle": "{subhead}",
+  "source_bar": "Strong | Medium | Thin",
+  "article_blocks": [
+    {{
+      "heading": "Specific heading written for this article",
+      "body": "Detailed paragraph with concrete detail and actual insight. No generic filler."
+    }},
+    {{
+      "heading": "Specific heading written for this article",
+      "body": "Detailed paragraph that adds a new idea, not a repeat."
+    }},
+    {{
+      "heading": "Specific heading written for this article",
+      "body": "Detailed paragraph that adds a new idea, not a repeat."
+    }},
+    {{
+      "heading": "Specific heading written for this article",
+      "body": "Detailed paragraph that adds a new idea, not a repeat."
+    }}
+  ],
+  "sources": [
+    {{
+      "title": "Source title",
+      "source": "Source name",
+      "date_or_recency": "Date or recency",
+      "url": "URL",
+      "why_it_was_used": "Specific reason this source mattered to the article."
+    }}
+  ]
 }}
 """
 
@@ -370,47 +411,48 @@ def build_refinement_prompt(draft_json: dict, deep_results: str) -> str:
     draft_text = json.dumps(draft_json, ensure_ascii=False, indent=2)
 
     return f"""
-You are editing a newsletter article draft.
+You are editing a paid social newsletter draft.
 
-Reviewer feedback to solve:
-- The writing should not be repetitive.
-- It should not feel templatey.
-- It should not sound like generic paid social advice.
-- It should have depth and specific details.
-- It should feel like one interesting article, not a set of boxes.
+Previous reviewer feedback:
+- The writing felt repetitive.
+- It sounded templatey.
+- The points were too basic.
+- The sections repeated the same idea in different words.
+- Generic lines like "requires a deep understanding" say nothing.
+- The final output needs depth, specificity, and actually interesting material.
+
+Rewrite the draft JSON below.
 
 Draft JSON:
 {draft_text}
 
-Evidence available:
+Research evidence available:
 {deep_results}
 
-Edit the draft.
-
-Rules:
-1. Keep the exact same JSON schema.
+Editing rules:
+1. Keep the same JSON schema.
 2. Remove generic lines.
-3. Make the article more specific and interesting.
-4. Every paragraph should add something new.
-5. Use concrete details from the evidence where possible.
-6. Do not add unsupported facts.
-7. Do not use corporate phrases like "leverage," "unlock," "drive ROI," "must prioritize," or "deep understanding."
+3. Every article block must add a new idea.
+4. Do not repeat the main idea in different words.
+5. Add concrete mechanisms, source details, examples, tensions, or caveats wherever possible.
+6. If a sentence could apply to almost any marketing topic, delete or rewrite it.
+7. Do not add unsupported claims.
 8. Do not make it company-specific.
-9. Keep body between 600 and 950 words unless the evidence is thin.
-10. Keep the tone natural and readable.
+9. Do not use corporate phrases like "must prioritize," "leverage," "unlock," "drive ROI," or "deep understanding."
+10. Keep the article readable and not too long.
 
-Return ONLY valid JSON.
+Return ONLY valid JSON using the exact same schema.
 """
 
 
-# ── Search functions ──────────────────────────────────────────────────────────
+# ── Research functions ────────────────────────────────────────────────────────
 
 def search_batch(
     queries: list,
     max_results: int = 5,
     label: str = "",
     include_raw_content: bool = False,
-    body_limit: int = 1400
+    body_limit: int = 1200
 ) -> str:
     tavily = TavilyClient(api_key=TAVILY_API_KEY)
     seen_urls = set()
@@ -464,46 +506,93 @@ def search_batch(
     return "\n\n".join(results)
 
 
-def fallback_scout_queries() -> list:
+def fallback_discovery_queries() -> list:
     return [
-        "great advertising campaign case study specific strategy lesson",
-        "advertising effectiveness case study surprising insight paid social",
-        "brand campaign teardown creative strategy lesson",
-        "paid social case study detailed mechanics creative measurement",
-        "marketing science advertising effectiveness case study creative",
-        "famous ad campaign history why it worked case study",
-        "B2B advertising case study buyer behavior campaign mechanics",
-        "technology brand advertising campaign case study AI PC laptop enterprise",
-        "paid social measurement attribution mistake case study",
-        "platform advertising automation second order effects paid social",
-        "practitioner teardown paid social creative testing campaign",
-        "competitor messaging pattern technology advertising campaign analysis"
+        "paid social case study with results creative testing B2B technology",
+        "paid social advertising teardown B2B creative measurement case study",
+        "site:thinkwithgoogle.com advertising effectiveness case study paid social technology",
+        "site:business.linkedin.com B2B Institute paid social creative measurement research",
+        "site:effie.org technology advertising case study effectiveness digital media",
+        "site:warc.com paid social effectiveness case study technology marketing",
+        "site:business.reddit.com success stories technology B2B paid media",
+        "AI creative testing advertising case study CRM buyer language",
+        "paid social incrementality attribution geo lift case study",
+        "HP Lenovo Apple Microsoft AI PC advertising campaign messaging analysis",
+        "B2B buyer behavior enterprise technology digital advertising research",
+        "in-house media buying paid social operating model case study"
     ]
 
 
 # ── HTML rendering ────────────────────────────────────────────────────────────
 
-def paragraphs_to_html(body: str) -> str:
-    if not body:
-        return '<p style="margin:0;font-size:14px;color:#9CA3AF;">No article body returned.</p>'
-
-    parts = re.split(r"\n\s*\n", body.strip())
-    html_parts = []
-
-    for part in parts:
-        clean = part.strip()
-        if not clean:
-            continue
-
-        html_parts.append(
-            f"""
-<p style="margin:0 0 17px;font-size:14.5px;line-height:1.78;color:#374151;">
-  {esc(clean)}
+def paragraph(text: str, color: str = "#374151", size: str = "14px") -> str:
+    return f"""
+<p style="margin:0 0 14px;font-size:{size};line-height:1.75;color:{color};">
+  {esc(text)}
 </p>
 """
-        )
 
-    return "\n".join(html_parts)
+
+def article_blocks_html(blocks: list) -> str:
+    blocks = [b for b in safe_list(blocks) if isinstance(b, dict)]
+
+    if not blocks:
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No article body returned.</p>'
+
+    html = ""
+
+    for block in blocks:
+        heading = block.get("heading", "")
+        body = block.get("body", "")
+
+        html += f"""
+<div style="margin-bottom:24px;">
+  <h2 style="margin:0 0 9px;font-size:17px;line-height:1.35;color:#111827;">
+    {esc(heading)}
+  </h2>
+  {paragraph(body, "#374151", "14px")}
+</div>
+"""
+
+    return html
+
+
+def sources_html(sources: list) -> str:
+    sources = [s for s in safe_list(sources) if isinstance(s, dict)]
+
+    if not sources:
+        return '<p style="margin:0;font-size:13px;color:#9CA3AF;">No sources returned.</p>'
+
+    html = ""
+
+    for src in sources:
+        title = src.get("title", "")
+        source = src.get("source", "")
+        date = src.get("date_or_recency", "")
+        url = clean_url(src.get("url", "#"))
+        why = src.get("why_it_was_used", "")
+
+        html += f"""
+<div style="padding:14px 0;border-bottom:1px solid #E5E7EB;">
+  <p style="margin:0 0 5px;font-size:12px;color:#6B7280;">
+    <strong>{esc(source)}</strong>{' · ' if source and date else ''}{esc(date)}
+  </p>
+
+  <p style="margin:0 0 7px;font-size:14px;line-height:1.55;color:#111827;font-weight:700;">
+    <a href="{esc(url)}" style="color:#111827;text-decoration:none;">{esc(title)}</a>
+  </p>
+
+  <p style="margin:0 0 8px;font-size:13px;line-height:1.65;color:#4B5563;">
+    {esc(why)}
+  </p>
+
+  <p style="margin:0;font-size:12.5px;">
+    <a href="{esc(url)}" style="color:#2563EB;text-decoration:none;">Read source →</a>
+  </p>
+</div>
+"""
+
+    return html
 
 
 def build_html(data: dict) -> str:
@@ -511,14 +600,20 @@ def build_html(data: dict) -> str:
     date_str = now.strftime("%B %d, %Y")
     week_num = now.isocalendar()[1]
 
+    eyebrow = data.get("eyebrow", "Deep Read")
     title = data.get("title", "Paid Social Edge")
     subtitle = data.get("subtitle", "")
-    body = data.get("body", "")
-    main_source_title = data.get("main_source_title", "")
-    main_source_url = clean_url(data.get("main_source_url", "#"))
-    source_note = data.get("source_note", "")
+    source_bar = data.get("source_bar", "")
+    article_blocks = data.get("article_blocks", [])
+    sources = data.get("sources", [])
 
-    article_html = paragraphs_to_html(body)
+    source_bar_html = ""
+    if source_bar:
+        source_bar_html = f"""
+<p style="margin:11px 0 0;font-size:11px;color:#A7F3D0;letter-spacing:.4px;text-transform:uppercase;font-weight:700;">
+  Source bar: {esc(source_bar)}
+</p>
+"""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -541,7 +636,7 @@ def build_html(data: dict) -> str:
             </p>
 
             <p style="margin:0 0 10px;font-size:11px;font-weight:800;color:#6EE7B7;text-transform:uppercase;letter-spacing:1px;">
-              One Interesting Thing
+              {esc(eyebrow)}
             </p>
 
             <h1 style="margin:0 0 14px;font-size:25px;line-height:1.24;font-weight:850;color:#FFFFFF;">
@@ -551,6 +646,8 @@ def build_html(data: dict) -> str:
             <p style="margin:0;font-size:14.5px;line-height:1.65;color:#D1D5DB;">
               {esc(subtitle)}
             </p>
+
+            {source_bar_html}
           </td>
         </tr>
 
@@ -559,34 +656,23 @@ def build_html(data: dict) -> str:
         </tr>
 
         <tr>
-          <td style="background:#FFFFFF;padding:32px 36px 22px;border-bottom:1px solid #F3F4F6;">
-            {article_html}
+          <td style="background:#FFFFFF;padding:30px 34px 10px;border-bottom:1px solid #F3F4F6;">
+            {article_blocks_html(article_blocks)}
           </td>
         </tr>
 
         <tr>
-          <td style="background:#F9FAFB;padding:24px 36px 28px;border-bottom:1px solid #F3F4F6;">
-            <p style="margin:0 0 10px;font-size:10.5px;font-weight:800;color:#9CA3AF;
-                      text-transform:uppercase;letter-spacing:1px;">Main source</p>
-
-            <p style="margin:0 0 8px;font-size:14.5px;line-height:1.55;color:#111827;font-weight:700;">
-              <a href="{esc(main_source_url)}" style="color:#111827;text-decoration:none;">{esc(main_source_title)}</a>
-            </p>
-
-            <p style="margin:0 0 10px;font-size:13.5px;line-height:1.65;color:#4B5563;">
-              {esc(source_note)}
-            </p>
-
-            <p style="margin:0;font-size:12.5px;">
-              <a href="{esc(main_source_url)}" style="color:#2563EB;text-decoration:none;">Read source →</a>
-            </p>
+          <td style="background:#F9FAFB;padding:24px 34px 28px;border-bottom:1px solid #F3F4F6;">
+            <p style="margin:0 0 13px;font-size:10.5px;font-weight:800;color:#9CA3AF;
+                      text-transform:uppercase;letter-spacing:1px;">Sources</p>
+            {sources_html(sources)}
           </td>
         </tr>
 
         <tr>
           <td style="background:#111827;border-radius:0 0 14px 14px;padding:18px 36px;text-align:center;" bgcolor="#111827">
             <p style="margin:0;font-size:12px;color:#9CA3AF;">
-              Paid Social Edge · One useful advertising idea at a time
+              Paid Social Edge · Source-led research for paid social operators
             </p>
           </td>
         </tr>
@@ -643,108 +729,103 @@ def main():
 
     today = datetime.now(CST).strftime("%B %d, %Y")
 
-    print("\n[Phase 1] Generating scout queries...")
-    scout_prompt = build_scout_query_prompt(today)
+    print("\n[Phase 1] Generating discovery queries...")
+    query_prompt = build_discovery_query_prompt(today)
 
     try:
-        scout_data = call_groq(scout_prompt, max_tokens=1100, temperature=0.65)
-        scout_queries = scout_data.get("queries", [])
+        query_data = call_groq(query_prompt, max_tokens=1100, temperature=0.55)
+        discovery_queries = query_data.get("queries", [])
 
-        if not scout_queries:
+        if not discovery_queries:
             raise ValueError("No queries returned by model.")
 
     except Exception as e:
         print(f"  Query generation failed, using fallback queries. Error: {e}")
-        scout_queries = fallback_scout_queries()
+        discovery_queries = fallback_discovery_queries()
 
-    print("\nScout queries:")
-    for q in scout_queries:
+    print("\nDiscovery queries:")
+    for q in discovery_queries:
         print(f"  - {q}")
 
-    print("\n[Phase 2] Broad scouting search...")
-    scout_results = search_batch(
-        scout_queries,
+    print("\n[Phase 2] Broad discovery search...")
+    landscape_raw = search_batch(
+        discovery_queries,
         max_results=4,
-        label="Scout",
+        label="Discovery",
         include_raw_content=False,
-        body_limit=1000
+        body_limit=900
     )
 
-    if not scout_results.strip():
+    if not landscape_raw.strip():
         raise RuntimeError("No search results returned from Tavily.")
 
-    print("\n[Phase 3] Selecting one interesting find...")
+    print("\n[Phase 3] Selecting golden thread...")
     time.sleep(5)
 
-    selection_prompt = build_find_selection_prompt(
+    selection_prompt = build_story_selection_prompt(
         today=today,
-        scout_results=scout_results[:14000]
+        landscape_results=landscape_raw[:12000]
     )
 
-    selection = call_groq(selection_prompt, max_tokens=1500, temperature=0.3)
+    selection = call_groq(selection_prompt, max_tokens=1700, temperature=0.25)
 
-    find_title = selection.get("find_title", "One Interesting Thing")
-    article_angle = selection.get("article_angle", "")
-    why_worth_reading = selection.get("why_this_is_worth_reading", "")
-    main_source_title = selection.get("main_source_title", "")
-    main_source_url = selection.get("main_source_url", "")
-    source_strength = selection.get("source_strength", "")
-    what_to_avoid = selection.get("what_to_avoid", "")
-    followup_queries = selection.get("followup_queries", [])
+    headline = selection.get("headline", "Paid Social Edge")
+    subhead = selection.get("subhead", "")
+    golden_thread = selection.get("golden_thread", "")
+    why_interesting = selection.get("why_this_is_interesting", "")
+    editorial_warning = selection.get("editorial_warning", "")
+    targeted_queries = selection.get("targeted_search_queries", [])
 
-    if not followup_queries:
-        followup_queries = scout_queries[:6]
+    if not targeted_queries:
+        targeted_queries = discovery_queries[:6]
 
-    print(f"\nFind: {find_title}")
-    print(f"Angle: {article_angle}")
-    print(f"Main source: {main_source_title} — {main_source_url}")
-    print(f"Source strength: {source_strength}")
-    print(f"Avoid: {what_to_avoid}")
+    print(f"\nHeadline: {headline}")
+    print(f"Golden thread: {golden_thread}")
+    print(f"Source bar: {selection.get('source_bar', 'unknown')}")
+    print(f"Editorial warning: {editorial_warning}")
 
-    print("\n[Phase 4] Deepening the find with raw content...")
+    print("\n[Phase 4] Targeted deep search with raw content...")
     time.sleep(5)
 
-    deep_results = search_batch(
-        followup_queries,
+    deep_raw = search_batch(
+        targeted_queries,
         max_results=5,
         label="Deep",
         include_raw_content=True,
-        body_limit=3200
+        body_limit=2600
     )
 
-    if not deep_results.strip():
-        print("No deep results returned. Falling back to scout results.")
-        deep_results = scout_results
+    if not deep_raw.strip():
+        print("No targeted results returned. Falling back to landscape material.")
+        deep_raw = landscape_raw
 
-    print("\n[Phase 5] Writing article...")
+    print("\n[Phase 5] Writing article-led deep dive...")
     time.sleep(8)
 
-    article_prompt = build_article_prompt(
+    writer_prompt = build_writer_prompt(
         today=today,
-        find_title=find_title,
-        article_angle=article_angle,
-        why_worth_reading=why_worth_reading,
-        main_source_title=main_source_title,
-        main_source_url=main_source_url,
-        source_strength=source_strength,
-        what_to_avoid=what_to_avoid,
-        deep_results=deep_results[:18000],
-        scout_results=scout_results[:5000]
+        headline=headline,
+        subhead=subhead,
+        golden_thread=golden_thread,
+        why_interesting=why_interesting,
+        editorial_warning=editorial_warning,
+        deep_results=deep_raw[:17000],
+        landscape_results=landscape_raw[:5000]
     )
 
-    draft = call_groq(article_prompt, max_tokens=3300, temperature=0.35)
+    draft = call_groq(writer_prompt, max_tokens=3600, temperature=0.28)
 
     print("\n[Phase 6] Refining article...")
     time.sleep(5)
 
     refinement_prompt = build_refinement_prompt(
         draft_json=draft,
-        deep_results=deep_results[:16000]
+        deep_results=deep_raw[:15000]
     )
 
-    data = call_groq(refinement_prompt, max_tokens=3300, temperature=0.25)
+    data = call_groq(refinement_prompt, max_tokens=3600, temperature=0.22)
 
-    subject = data.get("subject_line") or f"Paid Social Edge: {data.get('title', find_title)}"
+    subject = data.get("subject_line") or f"Paid Social Edge: {data.get('title', headline)}"
     subject = compact_text(subject, 70)
 
     html = build_html(data)
