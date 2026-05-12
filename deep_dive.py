@@ -1,21 +1,13 @@
 """
 Paid Social Edge — Open-Ended Curator Newsletter
 
-Core idea:
-Find one genuinely interesting thing from advertising / paid social / brand stories /
-creative effectiveness / buyer behavior / measurement / platform shifts / campaign history,
-then write one short article about it.
-
-Output format:
-1. Title
-2. Subtitle
-3. Article body
-4. Main source link
-
-No fixed newsletter sections.
-No forced lessons.
-No forced "what to test."
-No forced Dell/company-specific recommendations.
+What this version fixes:
+- Uses Groq JSON Object Mode: response_format={"type": "json_object"}
+- Adds schema validation + retry logic
+- Uses Tavily Search for broad scouting
+- Uses Tavily Extract on the selected main source for cleaner source content
+- Keeps the newsletter simple: title, subtitle, article body, main source
+- Avoids rigid newsletter sections and generic "operator lessons" templates
 """
 
 from tavily import TavilyClient
@@ -39,11 +31,11 @@ FROM_EMAIL       = os.environ["FROM_EMAIL"]
 
 FROM_NAME        = "Paid Social Edge"
 SUBSCRIBERS_FILE = "subscribers.json"
+
 MODEL            = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 CST              = pytz.timezone("US/Central")
 
-# Set RUN_ODD_WEEKS_ONLY=true in GitHub Actions if this deep-dive runs only on odd weeks.
-# RUN_ODD_WEEKS_ONLY = os.environ.get("RUN_ODD_WEEKS_ONLY", "false").lower() == "true"
+RUN_ODD_WEEKS_ONLY = os.environ.get("RUN_ODD_WEEKS_ONLY", "false").lower() == "true"
 
 
 # ── Week gate ─────────────────────────────────────────────────────────────────
@@ -51,14 +43,14 @@ CST              = pytz.timezone("US/Central")
 def check_week():
     week = datetime.now(CST).isocalendar()[1]
 
-   # if RUN_ODD_WEEKS_ONLY and week % 2 == 0:
-      #  print(f"Week {week} is even — skipping this deep-dive run.")
-      #  exit(0)
+    if RUN_ODD_WEEKS_ONLY and week % 2 == 0:
+        print(f"Week {week} is even — skipping this deep-dive run.")
+        exit(0)
 
     print(f"Week {week} — running Paid Social Edge curator issue.")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Basic helpers ─────────────────────────────────────────────────────────────
 
 def esc(value) -> str:
     if value is None:
@@ -84,49 +76,105 @@ def compact_text(text: str, max_chars: int) -> str:
     return text[:max_chars].rsplit(" ", 1)[0] + "..."
 
 
-def extract_json(raw: str) -> dict:
-    clean = re.sub(r"```(?:json)?|```", "", raw or "").strip()
+def get_json_text(raw: str) -> str:
+    """
+    Groq JSON mode should return valid JSON, but this fallback helps if a model
+    accidentally wraps JSON in markdown or includes surrounding text.
+    """
+    if not raw:
+        raise ValueError("Empty model output.")
+
+    clean = re.sub(r"```(?:json)?|```", "", raw).strip()
+
+    try:
+        json.loads(clean)
+        return clean
+    except Exception:
+        pass
+
     match = re.search(r"\{.*\}", clean, re.DOTALL)
-
     if not match:
-        raise ValueError(f"No JSON object found in model output:\n{raw[:900]}")
+        raise ValueError(f"No JSON object found in model output:\n{raw[:1000]}")
 
-    return json.loads(match.group())
+    return match.group()
 
 
-def call_groq(prompt: str, max_tokens: int = 2200, temperature: float = 0.35) -> dict:
+def validate_keys(data: dict, required_keys: list, step_name: str):
+    missing = [k for k in required_keys if k not in data]
+    if missing:
+        raise ValueError(f"{step_name} missing required keys: {missing}")
+
+
+def call_groq_json(
+    prompt: str,
+    required_keys: list,
+    step_name: str,
+    max_tokens: int = 1800,
+    temperature: float = 0.35,
+    repair_context: str = ""
+) -> dict:
+    """
+    Calls Groq using JSON Object Mode and validates required keys.
+    If schema-like validation fails, retries with a stricter repair prompt.
+    """
     groq_client = Groq(api_key=GROQ_API_KEY)
+
+    system_message = (
+        "You are a JSON API. Return exactly one valid JSON object. "
+        "No markdown. No preamble. No copied source text outside JSON. "
+        "Use double quotes for all JSON strings."
+    )
+
+    last_error = None
+    current_prompt = prompt
 
     for attempt in range(3):
         try:
             if attempt > 0:
-                wait = 15 * attempt
-                print(f"  Retry {attempt}/2 after {wait}s pause...")
+                wait = 10 * attempt
+                print(f"  Retrying {step_name} after {wait}s...")
                 time.sleep(wait)
 
             resp = groq_client.chat.completions.create(
                 model=MODEL,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": current_prompt}
+                ],
                 temperature=temperature,
                 max_tokens=max_tokens,
+                response_format={"type": "json_object"},
             )
 
-            raw = resp.choices[0].message.content
-            return extract_json(raw)
-
-        except json.JSONDecodeError as e:
-            print(f"  JSON parse error attempt {attempt + 1}: {e}")
-            if attempt == 2:
-                raise
+            raw = resp.choices[0].message.content or ""
+            json_text = get_json_text(raw)
+            data = json.loads(json_text)
+            validate_keys(data, required_keys, step_name)
+            return data
 
         except Exception as e:
-            err = str(e).lower()
-            if "rate_limit" in err or "429" in err:
-                print("  Rate limit hit — retrying after pause...")
-                continue
-            raise
+            last_error = e
+            print(f"  {step_name} JSON attempt {attempt + 1} failed: {e}")
 
-    raise RuntimeError("Groq call failed after 3 attempts.")
+            current_prompt = f"""
+The previous response failed JSON validation.
+
+Error:
+{str(e)}
+
+Required top-level keys:
+{required_keys}
+
+Return one valid JSON object only. No markdown. No explanation.
+
+Original task:
+{prompt}
+
+Additional context:
+{repair_context[:4000]}
+"""
+
+    raise RuntimeError(f"{step_name} failed after 3 attempts. Last error: {last_error}")
 
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
@@ -135,12 +183,12 @@ def build_scout_query_prompt(today: str) -> str:
     return f"""
 Today is {today}.
 
-You are creating search queries for an open-ended advertising and paid social curator newsletter.
+Create search queries for an open-ended advertising and paid social curator newsletter.
 
-The goal is NOT to cover a predefined topic.
+The goal is not to cover a predefined topic.
 The goal is to discover one genuinely interesting thing worth writing about.
 
-The reader works in paid social at a large technology company, but the newsletter should NOT sound company-specific.
+The reader works in paid social at a large technology company, but the newsletter should not sound company-specific.
 Use that context only to judge relevance.
 
 Look broadly across:
@@ -162,18 +210,6 @@ Look broadly across:
 - practitioner teardowns
 - research reports
 
-A good query should help uncover something with:
-- a real story
-- a surprising detail
-- a specific mechanism
-- a useful tension
-- a mistake operators can learn from
-- a campaign mechanic worth studying
-- a buyer behavior insight
-- a measurement caveat
-- a creative strategy lesson
-- a source worth reading
-
 Avoid generic searches like:
 - paid social trends
 - AI marketing best practices
@@ -187,10 +223,7 @@ Digiday, Marketing Brew, eMarketer, The Information, Harvard Business Review,
 Stratechery, Lenny's Newsletter, Exit Five, Marketing Examples, Ads of the World,
 Contagious, Campaign, The Drum, and strong practitioner teardowns.
 
-Also consider public ad libraries, campaign pages, brand pages, landing pages, YouTube channels, and competitor examples.
-
-Return ONLY valid JSON.
-
+Return JSON only with this schema:
 {{
   "queries": [
     "query 1",
@@ -217,7 +250,7 @@ Today is {today}.
 You are the curator of a high-quality advertising and paid social newsletter.
 
 Your job:
-From the research results below, find ONE genuinely interesting thing worth writing about.
+From the research results below, find one genuinely interesting thing worth writing about.
 
 Do not choose a broad topic.
 Do not choose something because it is trendy.
@@ -256,8 +289,7 @@ Avoid:
 Selection standard:
 A strong find should have at least one concrete detail that makes it worth writing about.
 
-Return ONLY valid JSON.
-
+Return JSON only with this schema:
 {{
   "should_publish": true,
   "find_title": "A short description of the chosen find",
@@ -284,18 +316,19 @@ def build_article_prompt(
     main_source_url: str,
     source_strength: str,
     what_to_avoid: str,
+    extracted_main_source: str,
     deep_results: str,
     scout_results: str
 ) -> str:
     return f"""
 Today is {today}.
 
-You are writing one article-style email for a high-quality advertising and paid social newsletter.
+Write one article-style email for a high-quality advertising and paid social newsletter.
 
-This should NOT feel like a template.
+This should not feel like a template.
 There should be no fixed sections like "operator lessons," "what to test," "practical implications," or "key takeaways."
 
-The chosen find:
+Chosen find:
 {find_title}
 
 Article angle:
@@ -313,6 +346,9 @@ Source strength:
 
 What to avoid:
 {what_to_avoid}
+
+Extracted main source content:
+{extracted_main_source}
 
 Deep research results:
 {deep_results}
@@ -344,7 +380,7 @@ Hard rules:
 - Do not write repeated takeaways in different words.
 - Do not force advice.
 - Do not include bullet points unless the article genuinely needs them.
-- The body should be 600 to 950 words.
+- The body should be 500 to 850 words.
 - Use paragraphs.
 - Include concrete details from sources.
 - If the evidence is thin, be honest and write a shorter article.
@@ -352,8 +388,7 @@ Hard rules:
 - If the main source is promotional, say how to read it carefully.
 - End naturally. Do not add a forced conclusion section.
 
-Return ONLY valid JSON.
-
+Return JSON only with this schema:
 {{
   "subject_line": "Email subject line under 70 characters",
   "title": "Article title",
@@ -366,11 +401,11 @@ Return ONLY valid JSON.
 """
 
 
-def build_refinement_prompt(draft_json: dict, deep_results: str) -> str:
+def build_refinement_prompt(draft_json: dict, evidence: str) -> str:
     draft_text = json.dumps(draft_json, ensure_ascii=False, indent=2)
 
     return f"""
-You are editing a newsletter article draft.
+Edit this newsletter article draft.
 
 Reviewer feedback to solve:
 - The writing should not be repetitive.
@@ -383,9 +418,7 @@ Draft JSON:
 {draft_text}
 
 Evidence available:
-{deep_results}
-
-Edit the draft.
+{evidence}
 
 Rules:
 1. Keep the exact same JSON schema.
@@ -396,14 +429,23 @@ Rules:
 6. Do not add unsupported facts.
 7. Do not use corporate phrases like "leverage," "unlock," "drive ROI," "must prioritize," or "deep understanding."
 8. Do not make it company-specific.
-9. Keep body between 600 and 950 words unless the evidence is thin.
+9. Keep body between 500 and 850 words unless the evidence is thin.
 10. Keep the tone natural and readable.
 
-Return ONLY valid JSON.
+Return JSON only with this schema:
+{{
+  "subject_line": "Email subject line under 70 characters",
+  "title": "Article title",
+  "subtitle": "One-sentence subtitle",
+  "body": "Full article body with paragraphs separated by blank lines.",
+  "main_source_title": "Main source title",
+  "main_source_url": "Main source URL",
+  "source_note": "One sentence on why this source is worth reading or how to read it carefully."
+}}
 """
 
 
-# ── Search functions ──────────────────────────────────────────────────────────
+# ── Tavily functions ──────────────────────────────────────────────────────────
 
 def search_batch(
     queries: list,
@@ -426,10 +468,13 @@ def search_batch(
 
         try:
             response = tavily.search(
-                q,
+                query=q,
                 search_depth="advanced",
                 max_results=max_results,
-                include_raw_content=include_raw_content
+                include_raw_content=include_raw_content,
+                include_answer=False,
+                chunks_per_source=3,
+                timeout=45
             )
 
             for item in response.get("results", []):
@@ -442,6 +487,7 @@ def search_batch(
 
                 title = item.get("title", "")
                 published_date = item.get("published_date", "unknown")
+                score = item.get("score", "")
 
                 raw_content = item.get("raw_content") or ""
                 snippet_content = item.get("content") or ""
@@ -452,6 +498,7 @@ def search_batch(
                     f"TITLE: {title}\n"
                     f"URL: {url}\n"
                     f"DATE: {published_date}\n"
+                    f"SCORE: {score}\n"
                     f"BODY: {compact_text(content, body_limit)}\n"
                     f"---"
                 )
@@ -462,6 +509,41 @@ def search_batch(
             print(f"    Search error: {e}")
 
     return "\n\n".join(results)
+
+
+def extract_url_content(url: str, query: str = "") -> str:
+    if not url or url == "#":
+        return ""
+
+    tavily = TavilyClient(api_key=TAVILY_API_KEY)
+
+    try:
+        kwargs = {
+            "urls": [url],
+            "extract_depth": "advanced",
+            "format": "markdown",
+            "timeout": 30,
+            "include_images": False
+        }
+
+        if query:
+            kwargs["query"] = query
+            kwargs["chunks_per_source"] = 5
+
+        response = tavily.extract(**kwargs)
+        results = response.get("results", [])
+
+        if not results:
+            failed = response.get("failed_results", [])
+            print(f"  Tavily extract returned no result. Failed: {failed}")
+            return ""
+
+        raw = results[0].get("raw_content", "")
+        return compact_text(raw, 7000)
+
+    except Exception as e:
+        print(f"  Tavily extract failed for {url}: {e}")
+        return ""
 
 
 def fallback_scout_queries() -> list:
@@ -647,11 +729,17 @@ def main():
     scout_prompt = build_scout_query_prompt(today)
 
     try:
-        scout_data = call_groq(scout_prompt, max_tokens=1100, temperature=0.65)
-        scout_queries = scout_data.get("queries", [])
+        scout_data = call_groq_json(
+            prompt=scout_prompt,
+            required_keys=["queries"],
+            step_name="Scout query generation",
+            max_tokens=1200,
+            temperature=0.65
+        )
 
-        if not scout_queries:
-            raise ValueError("No queries returned by model.")
+        scout_queries = scout_data.get("queries", [])
+        if not isinstance(scout_queries, list) or not scout_queries:
+            raise ValueError("Scout queries must be a non-empty list.")
 
     except Exception as e:
         print(f"  Query generation failed, using fallback queries. Error: {e}")
@@ -674,25 +762,41 @@ def main():
         raise RuntimeError("No search results returned from Tavily.")
 
     print("\n[Phase 3] Selecting one interesting find...")
-    time.sleep(5)
+    time.sleep(3)
 
     selection_prompt = build_find_selection_prompt(
         today=today,
-        scout_results=scout_results[:14000]
+        scout_results=scout_results[:13000]
     )
 
-    selection = call_groq(selection_prompt, max_tokens=1500, temperature=0.3)
+    selection = call_groq_json(
+        prompt=selection_prompt,
+        required_keys=[
+            "find_title",
+            "article_angle",
+            "why_this_is_worth_reading",
+            "main_source_title",
+            "main_source_url",
+            "source_strength",
+            "what_to_avoid",
+            "followup_queries"
+        ],
+        step_name="Find selection",
+        max_tokens=1700,
+        temperature=0.30,
+        repair_context=scout_results[:4000]
+    )
 
     find_title = selection.get("find_title", "One Interesting Thing")
     article_angle = selection.get("article_angle", "")
     why_worth_reading = selection.get("why_this_is_worth_reading", "")
     main_source_title = selection.get("main_source_title", "")
-    main_source_url = selection.get("main_source_url", "")
+    main_source_url = clean_url(selection.get("main_source_url", ""))
     source_strength = selection.get("source_strength", "")
     what_to_avoid = selection.get("what_to_avoid", "")
     followup_queries = selection.get("followup_queries", [])
 
-    if not followup_queries:
+    if not isinstance(followup_queries, list) or not followup_queries:
         followup_queries = scout_queries[:6]
 
     print(f"\nFind: {find_title}")
@@ -701,23 +805,29 @@ def main():
     print(f"Source strength: {source_strength}")
     print(f"Avoid: {what_to_avoid}")
 
-    print("\n[Phase 4] Deepening the find with raw content...")
-    time.sleep(5)
+    print("\n[Phase 4] Extracting main source content...")
+    extracted_main_source = extract_url_content(
+        url=main_source_url,
+        query=article_angle or find_title
+    )
+
+    print("\n[Phase 5] Deepening the find with search...")
+    time.sleep(3)
 
     deep_results = search_batch(
         followup_queries,
-        max_results=5,
+        max_results=4,
         label="Deep",
         include_raw_content=True,
-        body_limit=3200
+        body_limit=2200
     )
 
     if not deep_results.strip():
         print("No deep results returned. Falling back to scout results.")
         deep_results = scout_results
 
-    print("\n[Phase 5] Writing article...")
-    time.sleep(8)
+    print("\n[Phase 6] Writing article...")
+    time.sleep(5)
 
     article_prompt = build_article_prompt(
         today=today,
@@ -728,21 +838,52 @@ def main():
         main_source_url=main_source_url,
         source_strength=source_strength,
         what_to_avoid=what_to_avoid,
-        deep_results=deep_results[:18000],
-        scout_results=scout_results[:5000]
+        extracted_main_source=extracted_main_source[:7000],
+        deep_results=deep_results[:12000],
+        scout_results=scout_results[:3000]
     )
 
-    draft = call_groq(article_prompt, max_tokens=3300, temperature=0.35)
+    draft = call_groq_json(
+        prompt=article_prompt,
+        required_keys=[
+            "subject_line",
+            "title",
+            "subtitle",
+            "body",
+            "main_source_title",
+            "main_source_url",
+            "source_note"
+        ],
+        step_name="Article writing",
+        max_tokens=3000,
+        temperature=0.35,
+        repair_context=(extracted_main_source + "\n\n" + deep_results)[:5000]
+    )
 
-    print("\n[Phase 6] Refining article...")
-    time.sleep(5)
+    print("\n[Phase 7] Refining article...")
+    time.sleep(3)
 
     refinement_prompt = build_refinement_prompt(
         draft_json=draft,
-        deep_results=deep_results[:16000]
+        evidence=(extracted_main_source + "\n\n" + deep_results)[:13000]
     )
 
-    data = call_groq(refinement_prompt, max_tokens=3300, temperature=0.25)
+    data = call_groq_json(
+        prompt=refinement_prompt,
+        required_keys=[
+            "subject_line",
+            "title",
+            "subtitle",
+            "body",
+            "main_source_title",
+            "main_source_url",
+            "source_note"
+        ],
+        step_name="Article refinement",
+        max_tokens=3000,
+        temperature=0.25,
+        repair_context=(extracted_main_source + "\n\n" + deep_results)[:4000]
+    )
 
     subject = data.get("subject_line") or f"Paid Social Edge: {data.get('title', find_title)}"
     subject = compact_text(subject, 70)
@@ -750,7 +891,7 @@ def main():
     html = build_html(data)
 
     print(f"\nSubject: {subject}")
-    print("[Phase 7] Sending email...")
+    print("[Phase 8] Sending email...")
     send_email(html, subject)
 
 
