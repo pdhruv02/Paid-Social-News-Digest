@@ -1,6 +1,5 @@
 """
 Biweekly Paid Social Edge Brief
-Runs every 2 weeks, Tuesday 6 AM CST.
 
 Purpose:
 A short, high-quality paid social signal brief.
@@ -14,6 +13,12 @@ Focus:
 - No forced actions
 - No "what to monitor"
 - No generic advice
+
+Token-safe version:
+- No refinement call by default
+- Smaller search payload
+- Smaller Groq max_tokens
+- Groq JSON mode + validation
 """
 
 from tavily import TavilyClient
@@ -42,6 +47,10 @@ CST              = pytz.timezone("US/Central")
 
 # Set RUN_EVEN_WEEKS_ONLY=true in GitHub Actions if this brief should run only on even weeks.
 RUN_EVEN_WEEKS_ONLY = os.environ.get("RUN_EVEN_WEEKS_ONLY", "false").lower() == "true"
+
+# Keep this false unless you upgrade Groq token limits.
+# The previous run failed because refinement pushed you over the daily token limit.
+USE_REFINEMENT = os.environ.get("USE_REFINEMENT", "false").lower() == "true"
 
 
 # ── Biweekly gate ─────────────────────────────────────────────────────────────
@@ -114,7 +123,7 @@ def call_groq_json(
     prompt: str,
     required_keys: list,
     step_name: str,
-    max_tokens: int = 2400,
+    max_tokens: int = 2200,
     temperature: float = 0.25,
     repair_context: str = ""
 ) -> dict:
@@ -156,6 +165,11 @@ def call_groq_json(
             last_error = e
             print(f"  {step_name} JSON attempt {attempt + 1} failed: {e}")
 
+            # If rate limit is hit, do not keep retrying aggressively.
+            err = str(e).lower()
+            if "rate limit" in err or "rate_limit" in err or "429" in err:
+                raise
+
             current_prompt = f"""
 The previous response failed JSON validation.
 
@@ -171,7 +185,7 @@ Original task:
 {prompt}
 
 Additional context:
-{repair_context[:4000]}
+{repair_context[:2500]}
 """
 
     raise RuntimeError(f"{step_name} failed after 3 attempts. Last error: {last_error}")
@@ -193,7 +207,6 @@ The output should be useful because the research is strong, not because it force
 Look for:
 - meaningful paid social platform changes
 - platform automation or AI changes
-- influencer marketing changes or platform updates or changes for influencer related marketing/campaigns
 - measurement, attribution, incrementality, MMM, privacy, or signal-quality updates
 - creative testing patterns or ad format shifts
 - credible research reports
@@ -230,9 +243,7 @@ Return JSON only with this schema:
     "query 5",
     "query 6",
     "query 7",
-    "query 8",
-    "query 9",
-    "query 10"
+    "query 8"
   ]
 }}
 """
@@ -256,7 +267,7 @@ Find the strongest 3 to 5 research-backed signals from the raw search results an
 Raw search results:
 {search_results}
 
-A strong signal can be, dont be limited by these, this is just examples to give you idea of what can you qualify:
+A strong signal can be:
 - a real platform update
 - a paid social measurement shift
 - a credible research finding
@@ -285,7 +296,7 @@ Hard filter out:
 - vague trend commentary
 - thin platform promotion
 - anything that only says “AI improves performance”
-- anything that requires a forced “action” to make it seem useful
+- anything that requires a forced action to make it seem useful
 
 Time logic:
 - Prefer the last 14 to 30 days for news/platform updates.
@@ -306,7 +317,7 @@ Writing style:
 - no generic endings
 
 For each signal, write a mini write-up.
-Do not use rigid sections like “action,” “monitor,” or “Dell angle.”
+Do not use rigid sections like “action,” “monitor,” or “company angle.”
 The write-up should explain what happened, why it is interesting, and what makes it worth reading.
 
 If only 2 strong signals exist, include only 2.
@@ -325,7 +336,7 @@ Return JSON only with this schema:
       "source_name": "Source name",
       "source_url": "Direct URL",
       "recency": "Date or recency",
-      "writeup": "A concise but thoughtful mini write-up. 120-180 words. Explain the actual detail, why it is interesting, and why it is worth reading. No forced advice."
+      "writeup": "A concise but thoughtful mini write-up. 90-150 words. Explain the actual detail, why it is interesting, and why it is worth reading. No forced advice."
     }}
   ],
   "best_links": [
@@ -383,7 +394,7 @@ Return JSON only with this schema:
       "source_name": "Source name",
       "source_url": "Direct URL",
       "recency": "Date or recency",
-      "writeup": "120-180 word mini write-up"
+      "writeup": "90-150 word mini write-up"
     }}
   ],
   "best_links": [
@@ -407,9 +418,7 @@ def fallback_queries() -> list:
         "paid social creative testing formats research recent",
         "B2B buyer behavior technology marketing research report recent",
         "AdExchanger Digiday Marketing Brew paid social advertising platform changes",
-        "Think with Google IAB LinkedIn B2B Institute paid social research recent",
-        "ad tech measurement signal loss attribution paid media recent",
-        "paid social practitioner teardown creative testing campaign recent"
+        "Think with Google IAB LinkedIn B2B Institute paid social research recent"
     ]
 
 
@@ -430,10 +439,10 @@ def run_searches(queries: list) -> str:
             response = tavily.search(
                 query=q,
                 search_depth="advanced",
-                max_results=4,
+                max_results=3,
                 include_raw_content=False,
                 include_answer=False,
-                chunks_per_source=3,
+                chunks_per_source=2,
                 timeout=45
             )
 
@@ -451,7 +460,7 @@ def run_searches(queries: list) -> str:
                     f"URL: {url}\n"
                     f"DATE: {item.get('published_date','unknown')}\n"
                     f"SCORE: {item.get('score','')}\n"
-                    f"BODY: {compact_text(item.get('content',''), 900)}\n"
+                    f"BODY: {compact_text(item.get('content',''), 700)}\n"
                     f"---"
                 )
 
@@ -685,7 +694,7 @@ def main():
             prompt=build_query_prompt(today),
             required_keys=["queries"],
             step_name="Query generation",
-            max_tokens=1100,
+            max_tokens=900,
             temperature=0.5
         )
 
@@ -709,8 +718,8 @@ def main():
         raise RuntimeError("No search results returned from Tavily.")
 
     print("\n[Phase 3] Compiling signal brief...")
-    draft = call_groq_json(
-        prompt=build_brief_prompt(today, raw[:15000]),
+    data = call_groq_json(
+        prompt=build_brief_prompt(today, raw[:9000]),
         required_keys=[
             "period",
             "headline",
@@ -719,26 +728,33 @@ def main():
             "best_links"
         ],
         step_name="Brief compilation",
-        max_tokens=3200,
+        max_tokens=2200,
         temperature=0.25,
-        repair_context=raw[:4000]
+        repair_context=raw[:2500]
     )
 
-    print("\n[Phase 4] Refining signal brief...")
-    data = call_groq_json(
-        prompt=build_refinement_prompt(draft, raw[:14000]),
-        required_keys=[
-            "period",
-            "headline",
-            "intro",
-            "signals",
-            "best_links"
-        ],
-        step_name="Brief refinement",
-        max_tokens=3200,
-        temperature=0.2,
-        repair_context=raw[:4000]
-    )
+    # Optional refinement, off by default to avoid Groq token-limit failures.
+    if USE_REFINEMENT:
+        try:
+            print("\n[Phase 4] Refining signal brief...")
+            data = call_groq_json(
+                prompt=build_refinement_prompt(data, raw[:7000]),
+                required_keys=[
+                    "period",
+                    "headline",
+                    "intro",
+                    "signals",
+                    "best_links"
+                ],
+                step_name="Brief refinement",
+                max_tokens=1600,
+                temperature=0.2,
+                repair_context=raw[:2000]
+            )
+        except Exception as e:
+            print(f"Refinement failed, using compiled draft instead. Error: {e}")
+    else:
+        print("\n[Phase 4] Skipping refinement to save Groq tokens.")
 
     n = len(data.get("signals", []))
     print(f"Compiled {n} signals.")
