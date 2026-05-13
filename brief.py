@@ -32,6 +32,7 @@ def should_run_today() -> bool:
 # ── Searches ──────────────────────────────────────────────────────────────────
 SEARCH_QUERIES = [
     "Meta Facebook Instagram ads algorithm changes updates last 2 weeks",
+    "Meta Facebook Instagram influencer marketing ads related changes updates last 2 weeks",
     "LinkedIn ads B2B targeting changes announcements recent",
     "TikTok Reddit ads new features changes recent",
     "Google YouTube ads paid social cross-channel news recent",
@@ -63,6 +64,7 @@ A strong signal is one that:
 - Is relevant to paid social operators working across platforms like Meta, LinkedIn, Google/YouTube, Reddit, TikTok, X, or similar channels
 
 HARD FILTER. Exclude anything that is:
+- old, the source was posted or written on a date older than 30 days ago
 - Generic marketing advice or tips
 - Platform promotional content with no real change underneath
 - Evergreen content with a recent date
