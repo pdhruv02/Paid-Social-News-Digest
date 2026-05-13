@@ -200,7 +200,7 @@ These are examples, not a required list.
 
 Return JSON only:
 
-{
+{{
   "queries": [
     "query 1",
     "query 2",
@@ -211,7 +211,7 @@ Return JSON only:
     "query 7",
     "query 8"
   ]
-}
+}}
 """
 
 
@@ -245,27 +245,27 @@ Keep the writing simple, specific, and natural.
 
 Return JSON only:
 
-{
+{{
   "period": "{today}",
   "headline": "A short headline for this brief",
   "intro": "2-3 sentences summarizing what stood out this cycle.",
   "items": [
-    {
+    {{
       "title": "Specific update title",
       "label": "Platform | Measurement | Creative | Research | Brand/Category | AI/Automation | Creator/Influencer | Media/Ad Tech | Other",
       "source_name": "Source name",
       "source_url": "Direct URL",
       "date": "Date or recency",
       "note": "90-150 words. Explain what changed, why it caught attention, and why it is worth reading. No forced advice."
-    }
+    }}
   ],
   "links": [
-    {
+    {{
       "title": "Source title",
       "url": "URL"
-    }
+    }}
   ]
-}
+}}
 """
 
 
