@@ -2,23 +2,17 @@
 Biweekly Paid Social Edge Brief
 
 Purpose:
-A short, high-quality paid social signal brief.
+A short paid social / advertising update brief.
 
-Focus:
-- Quality of research
-- Interesting updates
-- Sharp insights
-- Strong write-up
-- No Dell angle
-- No forced actions
-- No "what to monitor"
-- No generic advice
+Goal:
+Find recent updates, changes, launches, research, findings, or industry moves
+from roughly the last 14 days. Stretch to 30 days only if the item is strong.
 
-Token-safe version:
-- No refinement call by default
-- Smaller search payload
-- Smaller Groq max_tokens
-- Groq JSON mode + validation
+No Dell angle.
+No forced actions.
+No "what to monitor."
+No over-structured prompt.
+No refinement call by default.
 """
 
 from tavily import TavilyClient
@@ -45,15 +39,11 @@ SUBSCRIBERS_FILE = "subscribers.json"
 MODEL            = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 CST              = pytz.timezone("US/Central")
 
-# Set RUN_EVEN_WEEKS_ONLY=true in GitHub Actions if this brief should run only on even weeks.
+# Set RUN_EVEN_WEEKS_ONLY=true in GitHub Actions if this brief should run only on even ISO weeks.
 RUN_EVEN_WEEKS_ONLY = os.environ.get("RUN_EVEN_WEEKS_ONLY", "false").lower() == "true"
 
-# Keep this false unless you upgrade Groq token limits.
-# The previous run failed because refinement pushed you over the daily token limit.
-USE_REFINEMENT = os.environ.get("USE_REFINEMENT", "false").lower() == "true"
 
-
-# ── Biweekly gate ─────────────────────────────────────────────────────────────
+# ── Week gate ─────────────────────────────────────────────────────────────────
 
 def should_run_today() -> bool:
     week = datetime.now(CST).isocalendar()[1]
@@ -165,7 +155,6 @@ def call_groq_json(
             last_error = e
             print(f"  {step_name} JSON attempt {attempt + 1} failed: {e}")
 
-            # If rate limit is hit, do not keep retrying aggressively.
             err = str(e).lower()
             if "rate limit" in err or "rate_limit" in err or "429" in err:
                 raise
@@ -191,50 +180,27 @@ Additional context:
     raise RuntimeError(f"{step_name} failed after 3 attempts. Last error: {last_error}")
 
 
-# ── Query prompt ──────────────────────────────────────────────────────────────
+# ── Prompts ───────────────────────────────────────────────────────────────────
 
 def build_query_prompt(today: str) -> str:
     return f"""
 Today is {today}.
 
-Create search queries for a short, high-quality paid social signal brief.
+Create search queries for a short paid social and advertising update brief.
 
-The goal is not to create a generic marketing newsletter.
-The goal is to find genuinely useful recent signals, updates, research findings, platform shifts, competitive moves, measurement changes, creative patterns, or practitioner insights.
+The brief should find recent updates, changes, launches, research, findings, or notable moves from roughly the last 14 days. Use 30 days only if the item is genuinely strong.
 
-The output should be useful because the research is strong, not because it forces advice.
+Priority goes to things that could matter to paid social operators: ad platform changes, media buying shifts, creator/influencer product changes, measurement updates, automation or AI changes, ad format launches, privacy/signal changes, credible research, or notable campaign/category moves.
 
-Look for:
-- meaningful paid social platform changes
-- platform automation or AI changes
-- measurement, attribution, incrementality, MMM, privacy, or signal-quality updates
-- creative testing patterns or ad format shifts
-- credible research reports
-- real campaign examples
-- competitor or category advertising moves
-- buyer behavior research
-- ad tech and media buying changes
-- practitioner observations with real examples or data
+Do not look for generic marketing advice or evergreen best practices.
 
-Avoid:
-- generic best practices
-- SEO listicles
-- surface-level trend pieces
-- "how to improve ROI" articles
-- weak opinion pieces
-- platform promotional content with no real detail
+Use credible sources when possible. Examples include official platform blogs, platform business/help centers, AdExchanger, Digiday, Marketing Brew, eMarketer, The Information, Search Engine Land, Social Media Today, IAB, Think with Google, LinkedIn B2B Institute, Reddit for Business, Meta for Business, TikTok Business, YouTube/Google Ads updates, WARC, Effie, Campaign, The Drum, and strong practitioner sources.
 
-Use a mix of:
-- recent platform/news queries
-- source-specific queries
-- research/report queries
-- measurement queries
-- creative/platform queries
-- practitioner/teardown queries
+These are examples, not a required list.
 
-Return JSON only with this schema:
+Return JSON only:
 
-{{
+{
   "queries": [
     "query 1",
     "query 2",
@@ -245,165 +211,61 @@ Return JSON only with this schema:
     "query 7",
     "query 8"
   ]
-}}
+}
 """
 
-
-# ── Brief prompt ──────────────────────────────────────────────────────────────
 
 def build_brief_prompt(today: str, search_results: str) -> str:
     return f"""
 Today is {today}.
 
-You are writing a short paid social signal brief.
+Write a short paid social and advertising update brief from the research below.
 
-This is not a generic newsletter.
-This is not an action-plan email.
-This is not a company-specific memo.
+Goal:
+Find the few recent updates, changes, launches, research findings, or industry moves that are actually worth knowing.
 
-Your only job:
-Find the strongest 3 to 5 research-backed signals from the raw search results and write them clearly.
+Default time window:
+Last 14 days.
 
-Raw search results:
+Stretch window:
+Last 30 days only if the item is unusually useful, credible, or important.
+
+Raw research results:
 {search_results}
 
-A strong signal can be:
-- a real platform update
-- a paid social measurement shift
-- a credible research finding
-- a campaign or creative pattern
-- a competitor/category move
-- a buyer behavior insight
-- an ad tech/media buying change
-- a practitioner observation with real detail
-- an unusual or under-discussed implication
+Prioritize recent platform-level or market-level changes that could matter to paid social operators. This includes ad platform updates, media buying changes, creator/influencer product changes, measurement or attribution changes, automation/AI changes, privacy/signal changes, ad format launches, credible research findings, or notable campaign/category moves.
 
-Selection bar:
-Only include something if it has at least one of:
-- a concrete detail
-- a named platform or source
-- a specific change
-- a data point
-- a real example
-- a credible research finding
-- a mechanism that explains why it matters
-- a non-obvious implication
+Skip generic marketing advice, evergreen best practices, weak platform announcements, SEO posts, vague trend pieces, and anything that is only interesting because it is recent.
 
-Hard filter out:
-- generic marketing advice
-- repeated common knowledge
-- SEO articles
-- vague trend commentary
-- thin platform promotion
-- anything that only says “AI improves performance”
-- anything that requires a forced action to make it seem useful
+Write 3 to 5 items max. If only 2 are strong, include only 2.
 
-Time logic:
-- Prefer the last 14 to 30 days for news/platform updates.
-- Allow 60 to 90 days for strong research reports.
-- Do not include old evergreen content unless it became newly relevant.
+Each item should be a short mini-note, not an action plan. Explain what changed, why it caught your attention, and why it is worth reading.
 
-Writing style:
-- concise
-- specific
-- interesting
-- plainspoken
-- non-corporate
-- no buzzwords
-- no forced advice
-- no “the team should”
-- no “brands must”
-- no “marketers need to”
-- no generic endings
+Keep the writing simple, specific, and natural.
 
-For each signal, write a mini write-up.
-Do not use rigid sections like “action,” “monitor,” or “company angle.”
-The write-up should explain what happened, why it is interesting, and what makes it worth reading.
+Return JSON only:
 
-If only 2 strong signals exist, include only 2.
-Do not pad.
-
-Return JSON only with this schema:
-
-{{
+{
   "period": "{today}",
-  "headline": "A short headline for this cycle's brief",
-  "intro": "2-3 sentences summarizing the main pattern across the strongest signals. No generic phrasing.",
-  "signals": [
-    {{
-      "title": "Specific signal title",
-      "signal_type": "Platform Shift | Measurement | Creative | Research | Competitor/Category | AI/Automation | Buyer Behavior | Ad Tech",
+  "headline": "A short headline for this brief",
+  "intro": "2-3 sentences summarizing what stood out this cycle.",
+  "items": [
+    {
+      "title": "Specific update title",
+      "label": "Platform | Measurement | Creative | Research | Brand/Category | AI/Automation | Creator/Influencer | Media/Ad Tech | Other",
       "source_name": "Source name",
       "source_url": "Direct URL",
-      "recency": "Date or recency",
-      "writeup": "A concise but thoughtful mini write-up. 90-150 words. Explain the actual detail, why it is interesting, and why it is worth reading. No forced advice."
-    }}
+      "date": "Date or recency",
+      "note": "90-150 words. Explain what changed, why it caught attention, and why it is worth reading. No forced advice."
+    }
   ],
-  "best_links": [
-    {{
+  "links": [
+    {
       "title": "Source title",
       "url": "URL"
-    }}
+    }
   ]
-}}
-"""
-
-
-# ── Optional refinement prompt ────────────────────────────────────────────────
-
-def build_refinement_prompt(draft_json: dict, evidence: str) -> str:
-    draft_text = json.dumps(draft_json, ensure_ascii=False, indent=2)
-
-    return f"""
-Edit this paid social signal brief.
-
-Reviewer feedback to solve:
-- The brief should focus on quality of research, updates, insight, and writing.
-- It should not force actions.
-- It should not sound like generic advice.
-- It should not include company-specific angles.
-- It should not feel templatey.
-
-Draft JSON:
-{draft_text}
-
-Evidence:
-{evidence}
-
-Editing rules:
-1. Keep the exact same JSON schema.
-2. Remove generic phrases.
-3. Make each signal more specific and interesting.
-4. Every signal write-up should include a concrete detail, mechanism, source detail, or non-obvious implication.
-5. Do not invent facts.
-6. Do not add action items.
-7. Do not use “marketers should,” “brands must,” “teams need to,” “leverage,” “unlock,” or “drive ROI.”
-8. If a signal is weak, make it shorter or remove it.
-9. Keep the tone clean and readable.
-
-Return JSON only with this schema:
-
-{{
-  "period": "Date",
-  "headline": "Brief headline",
-  "intro": "2-3 sentence intro",
-  "signals": [
-    {{
-      "title": "Specific signal title",
-      "signal_type": "Platform Shift | Measurement | Creative | Research | Competitor/Category | AI/Automation | Buyer Behavior | Ad Tech",
-      "source_name": "Source name",
-      "source_url": "Direct URL",
-      "recency": "Date or recency",
-      "writeup": "90-150 word mini write-up"
-    }}
-  ],
-  "best_links": [
-    {{
-      "title": "Source title",
-      "url": "URL"
-    }}
-  ]
-}}
+}
 """
 
 
@@ -411,14 +273,14 @@ Return JSON only with this schema:
 
 def fallback_queries() -> list:
     return [
-        "paid social advertising platform updates Meta LinkedIn TikTok Reddit Google last 30 days",
-        "Meta ads LinkedIn ads Reddit ads TikTok ads new features advertisers recent",
-        "paid social measurement attribution incrementality MMM privacy update recent",
-        "AI automation advertising platform campaign optimization creative testing recent",
-        "paid social creative testing formats research recent",
-        "B2B buyer behavior technology marketing research report recent",
-        "AdExchanger Digiday Marketing Brew paid social advertising platform changes",
-        "Think with Google IAB LinkedIn B2B Institute paid social research recent"
+        "paid social advertising platform updates Meta LinkedIn TikTok Reddit Google last 14 days",
+        "ad platform updates media buying measurement attribution last 30 days",
+        "creator influencer marketing platform launch ads recent",
+        "AI automation advertising platform update recent",
+        "paid social measurement privacy signal loss update recent",
+        "Meta LinkedIn Reddit TikTok YouTube ads update recent",
+        "AdExchanger Digiday Marketing Brew advertising platform changes recent",
+        "IAB eMarketer Think with Google paid media advertising research recent"
     ]
 
 
@@ -442,7 +304,6 @@ def run_searches(queries: list) -> str:
                 max_results=3,
                 include_raw_content=False,
                 include_answer=False,
-                chunks_per_source=2,
                 timeout=45
             )
 
@@ -474,28 +335,29 @@ def run_searches(queries: list) -> str:
 
 # ── Email HTML ────────────────────────────────────────────────────────────────
 
-CAT_COLORS = {
-    "Platform Shift":       "#1877F2",
-    "Measurement":          "#059669",
-    "Creative":             "#7C3AED",
-    "Competitor/Category":  "#DC2626",
-    "Research":             "#D97706",
-    "AI/Automation":        "#0891B2",
-    "Buyer Behavior":       "#0A66C2",
-    "Ad Tech":              "#4F46E5",
+LABEL_COLORS = {
+    "Platform":           "#1877F2",
+    "Measurement":        "#059669",
+    "Creative":           "#7C3AED",
+    "Research":           "#D97706",
+    "Brand/Category":     "#DC2626",
+    "AI/Automation":      "#0891B2",
+    "Creator/Influencer": "#BE185D",
+    "Media/Ad Tech":      "#4F46E5",
+    "Other":              "#4B5563",
 }
 DEF_COLOR = "#4B5563"
 
 
-def signal_html(s: dict, idx: int) -> str:
-    signal_type = s.get("signal_type", "Signal")
-    color = CAT_COLORS.get(signal_type, DEF_COLOR)
+def item_html(item: dict, idx: int) -> str:
+    label = item.get("label", "Other")
+    color = LABEL_COLORS.get(label, DEF_COLOR)
 
-    title = esc(s.get("title", ""))
-    src = esc(s.get("source_name", "Source"))
-    url = esc(s.get("source_url", "#"))
-    rec = esc(s.get("recency", ""))
-    writeup = esc(s.get("writeup", ""))
+    title = esc(item.get("title", ""))
+    src = esc(item.get("source_name", "Source"))
+    url = esc(clean_url(item.get("source_url", "#")))
+    date = esc(item.get("date", ""))
+    note = esc(item.get("note", ""))
 
     return f"""
 <table width="100%" cellpadding="0" cellspacing="0" border="0"
@@ -508,11 +370,11 @@ def signal_html(s: dict, idx: int) -> str:
           <td>
             <span style="background:{color};color:#fff;font-size:10px;font-weight:700;
                  letter-spacing:.7px;padding:2px 9px;border-radius:20px;text-transform:uppercase;">
-              {esc(signal_type)}
+              {esc(label)}
             </span>
           </td>
           <td align="right">
-            <span style="font-size:11px;color:#9CA3AF;">{rec}</span>
+            <span style="font-size:11px;color:#9CA3AF;">{date}</span>
           </td>
         </tr>
       </table>
@@ -522,7 +384,7 @@ def signal_html(s: dict, idx: int) -> str:
       </h3>
 
       <p style="margin:0 0 13px;font-size:13.8px;color:#374151;line-height:1.75;">
-        {writeup}
+        {note}
       </p>
 
       <a href="{url}" style="font-size:12.5px;color:{color};text-decoration:none;font-weight:600;">
@@ -542,10 +404,10 @@ def links_html(items: list) -> str:
     for item in items:
         if isinstance(item, dict):
             title = esc(item.get("title", item.get("url", "")))
-            url = esc(item.get("url", "#"))
+            url = esc(clean_url(item.get("url", "#")))
         else:
             title = esc(str(item))
-            url = esc(str(item))
+            url = esc(clean_url(str(item)))
 
         rows += (
             f'<tr><td style="padding:4px 0;">'
@@ -556,7 +418,7 @@ def links_html(items: list) -> str:
     return f"""
 <div style="margin-bottom:18px;">
   <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#6B7280;
-             text-transform:uppercase;letter-spacing:.8px;">Best links</p>
+             text-transform:uppercase;letter-spacing:.8px;">Links</p>
   <table cellpadding="0" cellspacing="0" border="0">{rows}</table>
 </div>"""
 
@@ -565,17 +427,17 @@ def build_brief_html(data: dict) -> str:
     now      = datetime.now(CST)
     date_str = now.strftime("%B %d, %Y")
     week_num = now.isocalendar()[1]
-    n        = len(data.get("signals", []))
+    n        = len(data.get("items", []))
 
     headline = esc(data.get("headline", "Paid Social Edge"))
     intro = esc(data.get("intro", ""))
 
-    signals_html = "\n".join(
-        signal_html(s, i + 1)
-        for i, s in enumerate(data.get("signals", []))
+    items_html = "\n".join(
+        item_html(item, i + 1)
+        for i, item in enumerate(data.get("items", []))
     )
 
-    links_section = links_html(data.get("best_links", []))
+    links_section = links_html(data.get("links", []))
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -597,7 +459,7 @@ def build_brief_html(data: dict) -> str:
         bgcolor="#1E1B4B">
       <p style="margin:0 0 5px;font-size:10px;font-weight:700;letter-spacing:2.5px;
                  color:#818CF8;text-transform:uppercase;">
-        Signal Brief &nbsp;·&nbsp; Week {week_num} &nbsp;·&nbsp; {esc(date_str)} &nbsp;·&nbsp; {n} signals
+        Update Brief &nbsp;·&nbsp; Week {week_num} &nbsp;·&nbsp; {esc(date_str)} &nbsp;·&nbsp; {n} items
       </p>
 
       <h1 style="margin:0 0 12px;font-size:25px;font-weight:800;color:#fff;letter-spacing:-.3px;">
@@ -616,7 +478,7 @@ def build_brief_html(data: dict) -> str:
 
   <tr>
     <td style="background:#F3F4F6;padding:24px 16px 4px;">
-      {signals_html}
+      {items_html}
     </td>
   </tr>
 
@@ -629,7 +491,7 @@ def build_brief_html(data: dict) -> str:
   <tr>
     <td style="background:#111827;border-radius:0 0 12px 12px;padding:20px 36px;text-align:center;" bgcolor="#111827">
       <p style="margin:0;font-size:12px;color:#6B7280;line-height:1.6;">
-        Paid Social Edge &nbsp;·&nbsp; High-signal research for paid social operators
+        Paid Social Edge &nbsp;·&nbsp; Recent updates worth knowing
       </p>
     </td>
   </tr>
@@ -694,8 +556,8 @@ def main():
             prompt=build_query_prompt(today),
             required_keys=["queries"],
             step_name="Query generation",
-            max_tokens=900,
-            temperature=0.5
+            max_tokens=800,
+            temperature=0.45
         )
 
         queries = query_data.get("queries", [])
@@ -717,15 +579,16 @@ def main():
     if not raw.strip():
         raise RuntimeError("No search results returned from Tavily.")
 
-    print("\n[Phase 3] Compiling signal brief...")
+    print("\n[Phase 3] Compiling update brief...")
+
     data = call_groq_json(
         prompt=build_brief_prompt(today, raw[:9000]),
         required_keys=[
             "period",
             "headline",
             "intro",
-            "signals",
-            "best_links"
+            "items",
+            "links"
         ],
         step_name="Brief compilation",
         max_tokens=2200,
@@ -733,35 +596,12 @@ def main():
         repair_context=raw[:2500]
     )
 
-    # Optional refinement, off by default to avoid Groq token-limit failures.
-    if USE_REFINEMENT:
-        try:
-            print("\n[Phase 4] Refining signal brief...")
-            data = call_groq_json(
-                prompt=build_refinement_prompt(data, raw[:7000]),
-                required_keys=[
-                    "period",
-                    "headline",
-                    "intro",
-                    "signals",
-                    "best_links"
-                ],
-                step_name="Brief refinement",
-                max_tokens=1600,
-                temperature=0.2,
-                repair_context=raw[:2000]
-            )
-        except Exception as e:
-            print(f"Refinement failed, using compiled draft instead. Error: {e}")
-    else:
-        print("\n[Phase 4] Skipping refinement to save Groq tokens.")
-
-    n = len(data.get("signals", []))
-    print(f"Compiled {n} signals.")
+    n = len(data.get("items", []))
+    print(f"Compiled {n} items.")
 
     html = build_brief_html(data)
     week_no = datetime.now(CST).isocalendar()[1]
-    subject = f"Paid Social Edge — {n} signals | Wk {week_no}"
+    subject = f"Paid Social Edge — {n} updates | Wk {week_no}"
     subject = compact_text(subject, 70)
 
     print(f"Subject: {subject}")
