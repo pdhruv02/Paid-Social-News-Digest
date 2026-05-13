@@ -188,7 +188,7 @@ Today is {today}.
 
 Create search queries for a short paid social and advertising update brief.
 
-The brief should find recent updates, changes, launches, research, findings, or notable moves from roughly the last 14 days. Use 30 days only if the item is genuinely strong.
+The brief should find recent updates, changes, launches, research, findings, or notable moves from the last 14 days (strict filter, check todays date and only qualify whats within last 2-3 weeks of date). Use 30 days only if the item is genuinely strong but not older than 30 days at any cost.
 
 Priority goes to things that could matter to paid social operators: ad platform changes, media buying shifts, creator/influencer product changes, measurement updates, automation or AI changes, ad format launches, privacy/signal changes, credible research, or notable campaign/category moves.
 
@@ -225,7 +225,7 @@ Goal:
 Find the few recent updates, changes, launches, research findings, or industry moves that are actually worth knowing.
 
 Default time window:
-Last 14 days.
+Last 14 days, check todays date to confirm.
 
 Stretch window:
 Last 30 days only if the item is unusually useful, credible, or important.
