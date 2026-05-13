@@ -46,7 +46,7 @@ SEARCH_QUERIES = [
 # ── Prompt ────────────────────────────────────────────────────────────────────
 BRIEF_PROMPT = """Today is {today}. You are a senior paid social operator building an intelligence brief for yourself.
 
-Context: You work in paid social for a large technology company. The audience includes enterprise IT buyers, SMB buyers, consumers, and gamers. Relevant spaces include B2B tech, consumer tech, gaming, AI PCs, enterprise hardware, media buying, creative testing, and paid social measurement.
+Context: This brief is for paid social operators working across B2B tech, consumer tech, gaming, enterprise hardware, AI, media buying, creative testing, and paid social measurement.
 
 You are NOT writing a generic newsletter. You are filtering raw search results to find only signals that genuinely matter for paid social strategy, creative, measurement, platform changes, buyer behavior, or competitive/category positioning.
 
@@ -54,7 +54,7 @@ RAW SEARCH RESULTS:
 {search_results}
 
 YOUR TASK:
-From these results, identify the 3–5 strongest signals from the last 14–30 days (allow up to 60–90 days for research reports if highly relevant).
+From these results, identify the 3–5 strongest signals from the last 14–30 days. Allow up to 60–90 days for research reports if highly relevant.
 
 A strong signal is one that:
 - Changes how a paid social operator might think about campaign structure, platform behavior, creative, or measurement
@@ -84,12 +84,9 @@ OUTPUT: Return ONLY valid JSON. No markdown fences, no preamble.
       "source_name": "e.g. LinkedIn Engineering Blog, Search Engine Land, Marketing Brew",
       "source_url": "direct URL",
       "recency": "e.g. April 22, 2026 or Last week",
-      "why_it_matters": "2–3 sentences. What actually happened and why it matters for paid social strategy, creative, or measurement. Be specific.",
-      "action": "One concrete thing to do: test, monitor, investigate, save, or bring to a team discussion. Specific."
+      "why_it_matters": "2–3 sentences. What actually happened and why it matters for paid social strategy, creative, measurement, platform behavior, buyer behavior, or category context. Be specific."
     }}
   ],
-  "act_on": ["specific thing 1", "specific thing 2"],
-  "monitor": ["thing to watch 1", "thing to watch 2"],
   "best_links": ["url1", "url2", "url3"]
 }}"""
 
@@ -123,7 +120,7 @@ def compile_brief(raw: str) -> dict:
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
-        max_tokens=3500,
+        max_tokens=3000,
     )
     raw_text = resp.choices[0].message.content
     clean = re.sub(r"```(?:json)?|```", "", raw_text).strip()
@@ -165,30 +162,14 @@ def signal_html(s: dict, idx: int) -> str:
     <h3 style="margin:10px 0 8px;font-size:15px;font-weight:700;color:#111827;line-height:1.4;">
       Signal {idx}: {s.get('title','')}
     </h3>
-    <p style="margin:0 0 10px;font-size:13.5px;color:#374151;line-height:1.75;">
-      <strong>Why it matters:</strong> {s.get('why_it_matters','')}
+    <p style="margin:0 0 12px;font-size:13.5px;color:#374151;line-height:1.75;">
+      {s.get('why_it_matters','')}
     </p>
-    <div style="background:#EFF6FF;border-radius:7px;padding:10px 14px;margin-bottom:12px;">
-      <span style="font-size:11px;font-weight:700;color:#1D4ED8;text-transform:uppercase;letter-spacing:.6px;">Action</span>
-      <p style="margin:4px 0 0;font-size:13px;color:#1E40AF;line-height:1.6;">{s.get('action','')}</p>
-    </div>
     <a href="{url}" style="font-size:12.5px;color:{color};text-decoration:none;font-weight:600;">
       {src} →
     </a>
   </td></tr>
 </table>"""
-
-
-def bullets_html(items: list, label: str, color: str) -> str:
-    if not items:
-        return ""
-    lis = "".join(f'<li style="margin-bottom:6px;font-size:13.5px;color:#374151;line-height:1.65;">{i}</li>' for i in items)
-    return f"""
-<div style="margin-bottom:18px;">
-  <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:{color};
-             text-transform:uppercase;letter-spacing:.8px;">{label}</p>
-  <ul style="margin:0;padding-left:18px;">{lis}</ul>
-</div>"""
 
 
 def links_html(urls: list) -> str:
@@ -220,21 +201,20 @@ def build_brief_html(data: dict) -> str:
     )
 
     signals_html = "\n".join(signal_html(s, i+1) for i, s in enumerate(data.get("signals", [])))
-    act_html     = bullets_html(data.get("act_on", []),   "What I would act on",  "#059669")
-    mon_html     = bullets_html(data.get("monitor", []),  "What I would monitor", "#D97706")
     lnk_html     = links_html(data.get("best_links", []))
 
     return f"""<!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Paid Social Edge Brief — {date_str}</title></head>
-<body style="margin:0;padding:0;background:#F3F4F6;
+<body style="margin:0;padding:0;background:#F3F4F6;" bgcolor="#F3F4F6">
+<table width="100%" bgcolor="#F3F4F6" style="background:#F3F4F6;
              font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px;">
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
 
   <!-- Header -->
-  <tr><td style="background:linear-gradient(135deg,#0F172A 0%,#1E1B4B 60%,#312E81 100%);
-                  border-radius:12px 12px 0 0;padding:32px 36px 28px;">
+  <tr><td style="background:#1E1B4B;border-radius:12px 12px 0 0;padding:32px 36px 28px;"
+        bgcolor="#1E1B4B">
     <p style="margin:0 0 5px;font-size:10px;font-weight:700;letter-spacing:2.5px;
                color:#818CF8;text-transform:uppercase;">
       Biweekly Brief &nbsp;·&nbsp; Week {week_num} &nbsp;·&nbsp; {date_str} &nbsp;·&nbsp; {n} signals
@@ -253,15 +233,13 @@ def build_brief_html(data: dict) -> str:
     {signals_html}
   </td></tr>
 
-  <!-- Act / Monitor / Links -->
+  <!-- Links -->
   <tr><td style="background:#ffffff;border-radius:0;padding:20px 24px;">
-    {act_html}
-    {mon_html}
     {lnk_html}
   </td></tr>
 
   <!-- Footer -->
-  <tr><td style="background:#111827;border-radius:0 0 12px 12px;padding:20px 36px;text-align:center;">
+  <tr><td style="background:#111827;border-radius:0 0 12px 12px;padding:20px 36px;text-align:center;" bgcolor="#111827">
     <p style="margin:0;font-size:12px;color:#6B7280;line-height:1.6;">
       Paid Social Edge &nbsp;·&nbsp; Biweekly paid social intelligence brief &nbsp;·&nbsp;
       Research via Tavily + Llama 3.3
@@ -303,7 +281,6 @@ def main():
 
     html     = build_brief_html(data)
     week_no  = datetime.now(CST).isocalendar()[1]
-    # Short subject line: under 60 chars
     subject  = f"Paid Social Edge — {n} signals | Wk {week_no}"
     print(f"Subject: {subject}")
     send(html, subject)
