@@ -1,424 +1,208 @@
 """
 Biweekly Paid Social Edge Brief
-
-Purpose:
-A short paid social / advertising update brief.
-
-Goal:
-Find recent updates, changes, launches, research, findings, or industry moves
-from roughly the last 14 days. Stretch to 30 days only if the item is strong.
-
-No Dell angle.
-No forced actions.
-No "what to monitor."
-No over-structured prompt.
-No refinement call by default.
+Runs every 2 weeks (even ISO week numbers), Tuesday 6 AM CST
+3-5 strongest signals only. No filler.
 """
 
 from tavily import TavilyClient
 from groq import Groq
 import resend
-import json
-import os
-import re
-import time
-import html as html_lib
+import json, os, re, time
 from datetime import datetime
 import pytz
 
-
 # ── Config ────────────────────────────────────────────────────────────────────
-
 TAVILY_API_KEY   = os.environ["TAVILY_API_KEY"]
 GROQ_API_KEY     = os.environ["GROQ_API_KEY"]
 RESEND_API_KEY   = os.environ["RESEND_API_KEY"]
 FROM_EMAIL       = os.environ["FROM_EMAIL"]
-
 FROM_NAME        = "Paid Social Edge"
 SUBSCRIBERS_FILE = "subscribers.json"
-MODEL            = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL            = "llama-3.3-70b-versatile"
 CST              = pytz.timezone("US/Central")
 
-# Set RUN_EVEN_WEEKS_ONLY=true in GitHub Actions if this brief should run only on even ISO weeks.
-RUN_EVEN_WEEKS_ONLY = os.environ.get("RUN_EVEN_WEEKS_ONLY", "false").lower() == "true"
-
-
-# ── Week gate ─────────────────────────────────────────────────────────────────
-
+# ── Biweekly gate: only run on even ISO week numbers ─────────────────────────
 def should_run_today() -> bool:
     week = datetime.now(CST).isocalendar()[1]
-
-    if RUN_EVEN_WEEKS_ONLY and week % 2 != 0:
-        print(f"Week {week} is odd — skipping this signal brief.")
+    if week % 2 != 0:
+        print(f"Week {week} is odd — skipping this cycle. Next brief runs week {week+1}.")
         return False
-
-    print(f"Week {week} — running Paid Social Edge signal brief.")
     return True
 
+# ── Searches ──────────────────────────────────────────────────────────────────
+SEARCH_QUERIES = [
+    "Meta Facebook Instagram ads algorithm changes updates last 2 weeks",
+    "LinkedIn ads B2B targeting changes announcements recent",
+    "TikTok Reddit ads new features changes recent",
+    "Google YouTube ads paid social cross-channel news recent",
+    "AI automation paid social advertising platform changes 2025 2026",
+    "paid social measurement attribution incrementality signal loss update",
+    "HP Lenovo Apple Microsoft enterprise technology advertising campaign 2025 2026",
+    "B2B enterprise buyer behavior research technology purchase paid social",
+    "paid social creative testing formats best practice research recent",
+    "ad tech programmatic measurement industry news acquisition recent",
+]
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Prompt ────────────────────────────────────────────────────────────────────
+BRIEF_PROMPT = """Today is {today}. You are a senior paid social operator building an intelligence brief for yourself.
 
-def esc(value) -> str:
-    if value is None:
-        return ""
-    return html_lib.escape(str(value), quote=True)
+Context: You work in paid social for a large technology company. The audience includes enterprise IT buyers, SMB buyers, consumers, and gamers. Relevant spaces include B2B tech, consumer tech, gaming, AI PCs, enterprise hardware, media buying, creative testing, and paid social measurement.
 
+You are NOT writing a generic newsletter. You are filtering raw search results to find only signals that genuinely matter for paid social strategy, creative, measurement, platform changes, buyer behavior, or competitive/category positioning.
 
-def clean_url(url: str) -> str:
-    if not url:
-        return "#"
-    return str(url).strip()
-
-
-def compact_text(text: str, max_chars: int) -> str:
-    if not text:
-        return ""
-
-    text = re.sub(r"\s+", " ", str(text)).strip()
-
-    if len(text) <= max_chars:
-        return text
-
-    return text[:max_chars].rsplit(" ", 1)[0] + "..."
-
-
-def get_json_text(raw: str) -> str:
-    if not raw:
-        raise ValueError("Empty model output.")
-
-    clean = re.sub(r"```(?:json)?|```", "", raw).strip()
-
-    try:
-        json.loads(clean)
-        return clean
-    except Exception:
-        pass
-
-    match = re.search(r"\{.*\}", clean, re.DOTALL)
-
-    if not match:
-        raise ValueError(f"No JSON object found in model output:\n{raw[:800]}")
-
-    return match.group()
-
-
-def validate_keys(data: dict, required_keys: list, step_name: str):
-    missing = [k for k in required_keys if k not in data]
-
-    if missing:
-        raise ValueError(f"{step_name} missing required keys: {missing}")
-
-
-def call_groq_json(
-    prompt: str,
-    required_keys: list,
-    step_name: str,
-    max_tokens: int = 2200,
-    temperature: float = 0.25,
-    repair_context: str = ""
-) -> dict:
-    groq_client = Groq(api_key=GROQ_API_KEY)
-
-    system_message = (
-        "You are a JSON API. Return exactly one valid JSON object. "
-        "No markdown. No preamble. No copied source text outside JSON. "
-        "Use double quotes for all JSON strings."
-    )
-
-    last_error = None
-    current_prompt = prompt
-
-    for attempt in range(3):
-        try:
-            if attempt > 0:
-                wait = 10 * attempt
-                print(f"  Retrying {step_name} after {wait}s...")
-                time.sleep(wait)
-
-            resp = groq_client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": current_prompt},
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                response_format={"type": "json_object"},
-            )
-
-            raw_text = resp.choices[0].message.content or ""
-            data = json.loads(get_json_text(raw_text))
-            validate_keys(data, required_keys, step_name)
-            return data
-
-        except Exception as e:
-            last_error = e
-            print(f"  {step_name} JSON attempt {attempt + 1} failed: {e}")
-
-            err = str(e).lower()
-            if "rate limit" in err or "rate_limit" in err or "429" in err:
-                raise
-
-            current_prompt = f"""
-The previous response failed JSON validation.
-
-Error:
-{str(e)}
-
-Required top-level keys:
-{required_keys}
-
-Return one valid JSON object only. No markdown. No explanation.
-
-Original task:
-{prompt}
-
-Additional context:
-{repair_context[:2500]}
-"""
-
-    raise RuntimeError(f"{step_name} failed after 3 attempts. Last error: {last_error}")
-
-
-# ── Prompts ───────────────────────────────────────────────────────────────────
-
-def build_query_prompt(today: str) -> str:
-    return f"""
-Today is {today}.
-
-Create search queries for a short paid social and advertising update brief.
-
-The brief should find recent updates, changes, launches, research, findings, or notable moves from the last 14 days (strict filter, check todays date and only qualify whats within last 2-3 weeks of date). Use 30 days only if the item is genuinely strong but not older than 30 days at any cost.
-
-Priority goes to things that could matter to paid social operators: ad platform changes, media buying shifts, creator/influencer product changes, measurement updates, automation or AI changes, ad format launches, privacy/signal changes, credible research, or notable campaign/category moves.
-
-Do not look for generic marketing advice or evergreen best practices.
-
-Use credible sources when possible. Examples include official platform blogs, platform business/help centers, AdExchanger, Digiday, Marketing Brew, eMarketer, The Information, Search Engine Land, Social Media Today, IAB, Think with Google, LinkedIn B2B Institute, Reddit for Business, Meta for Business, TikTok Business, YouTube/Google Ads updates, WARC, Effie, Campaign, The Drum, and strong practitioner sources.
-
-These are examples, not a required list.
-
-Return JSON only:
-
-{{
-  "queries": [
-    "query 1",
-    "query 2",
-    "query 3",
-    "query 4",
-    "query 5",
-    "query 6",
-    "query 7",
-    "query 8"
-  ]
-}}
-"""
-
-
-def build_brief_prompt(today: str, search_results: str) -> str:
-    return f"""
-Today is {today}.
-
-Write a short paid social and advertising update brief from the research below.
-
-Goal:
-Find the few recent updates, changes, launches, research findings, or industry moves that are actually worth knowing.
-
-Default time window:
-Last 14 days, check todays date to confirm.
-
-Stretch window:
-Last 30 days only if the item is unusually useful, credible, or important.
-
-Raw research results:
+RAW SEARCH RESULTS:
 {search_results}
 
-Prioritize recent platform-level or market-level changes that could matter to paid social operators. This includes ad platform updates, media buying changes, creator/influencer product changes, measurement or attribution changes, automation/AI changes, privacy/signal changes, ad format launches, credible research findings, or notable campaign/category moves.
+YOUR TASK:
+From these results, identify the 3–5 strongest signals from the last 14–30 days (allow up to 60–90 days for research reports if highly relevant).
 
-Skip generic marketing advice, evergreen best practices, weak platform announcements, SEO posts, vague trend pieces, and anything that is only interesting because it is recent.
+A strong signal is one that:
+- Changes how a paid social operator might think about campaign structure, platform behavior, creative, or measurement
+- Reveals something meaningful about platform mechanics, buyer behavior, media buying, or competitor/category activity
+- Contains actual data, a real case, a specific platform change, or a credible research finding — not generic opinion or tips
+- Is relevant to paid social operators working across platforms like Meta, LinkedIn, Google/YouTube, Reddit, TikTok, X, or similar channels
 
-Write 3 to 5 items max. If only 2 are strong, include only 2.
+HARD FILTER. Exclude anything that is:
+- Generic marketing advice or tips
+- Platform promotional content with no real change underneath
+- Evergreen content with a recent date
+- Opinion pieces with no data, mechanism, or examples
+- Something a competent senior buyer already knows
+- Not relevant to paid social, advertising, media buying, creative, measurement, or buyer behavior
 
-Each item should be a short mini-note, not an action plan. Explain what changed, why it caught your attention, and why it is worth reading.
+If fewer than 3 genuinely strong signals exist in the results, output fewer. Do NOT pad with weak items.
 
-Keep the writing simple, specific, and natural.
-
-Return JSON only:
+OUTPUT: Return ONLY valid JSON. No markdown fences, no preamble.
 
 {{
   "period": "{today}",
-  "headline": "A short headline for this brief",
-  "intro": "2-3 sentences summarizing what stood out this cycle.",
-  "items": [
+  "executive_summary": ["bullet 1 — one key theme or development", "bullet 2", "bullet 3"],
+  "signals": [
     {{
-      "title": "Specific update title",
-      "label": "Platform | Measurement | Creative | Research | Brand/Category | AI/Automation | Creator/Influencer | Media/Ad Tech | Other",
-      "source_name": "Source name",
-      "source_url": "Direct URL",
-      "date": "Date or recency",
-      "note": "90-150 words. Explain what changed, why it caught attention, and why it is worth reading. No forced advice."
+      "title": "Short signal title — specific and direct",
+      "category": "Platform Change | Measurement | Creative | Competitor | Research | AI/Automation | Buyer Behavior",
+      "source_name": "e.g. LinkedIn Engineering Blog, Search Engine Land, Marketing Brew",
+      "source_url": "direct URL",
+      "recency": "e.g. April 22, 2026 or Last week",
+      "why_it_matters": "2–3 sentences. What actually happened and why it matters for paid social strategy, creative, or measurement. Be specific.",
+      "action": "One concrete thing to do: test, monitor, investigate, save, or bring to a team discussion. Specific."
     }}
   ],
-  "links": [
-    {{
-      "title": "Source title",
-      "url": "URL"
-    }}
-  ]
-}}
-"""
+  "act_on": ["specific thing 1", "specific thing 2"],
+  "monitor": ["thing to watch 1", "thing to watch 2"],
+  "best_links": ["url1", "url2", "url3"]
+}}"""
 
-
-# ── Search ────────────────────────────────────────────────────────────────────
-
-def fallback_queries() -> list:
-    return [
-        "paid social advertising platform updates Meta LinkedIn TikTok Reddit Google last 14 days",
-        "ad platform updates media buying measurement attribution last 30 days",
-        "creator influencer marketing platform launch ads recent",
-        "AI automation advertising platform update recent",
-        "paid social measurement privacy signal loss update recent",
-        "Meta LinkedIn Reddit TikTok YouTube ads update recent",
-        "AdExchanger Digiday Marketing Brew advertising platform changes recent",
-        "IAB eMarketer Think with Google paid media advertising research recent"
-    ]
-
-
-def run_searches(queries: list) -> str:
+# ── Research ──────────────────────────────────────────────────────────────────
+def run_searches() -> str:
     tavily = TavilyClient(api_key=TAVILY_API_KEY)
     results = []
-    seen_urls = set()
-
-    for i, q in enumerate(queries, 1):
-        q = str(q).strip()
-
-        if not q:
-            continue
-
-        print(f"  [{i}/{len(queries)}] {q[:80]}...")
-
+    for i, q in enumerate(SEARCH_QUERIES, 1):
+        print(f"  [{i}/{len(SEARCH_QUERIES)}] {q[:60]}...")
         try:
-            response = tavily.search(
-                query=q,
-                search_depth="advanced",
-                max_results=3,
-                include_raw_content=False,
-                include_answer=False,
-                timeout=45
-            )
-
-            for item in response.get("results", []):
-                url = item.get("url", "").strip()
-
-                if not url or url in seen_urls:
-                    continue
-
-                seen_urls.add(url)
-
+            r = tavily.search(q, search_depth="advanced", max_results=4, include_raw_content=False)
+            for item in r.get("results", []):
                 results.append(
-                    f"QUERY: {q}\n"
                     f"TITLE: {item.get('title','')}\n"
-                    f"URL: {url}\n"
-                    f"DATE: {item.get('published_date','unknown')}\n"
-                    f"SCORE: {item.get('score','')}\n"
-                    f"BODY: {compact_text(item.get('content',''), 700)}\n"
-                    f"---"
+                    f"URL:   {item.get('url','')}\n"
+                    f"DATE:  {item.get('published_date','unknown')}\n"
+                    f"BODY:  {item.get('content','')[:500]}\n---"
                 )
-
             time.sleep(0.4)
-
         except Exception as e:
             print(f"    Search error: {e}")
-
     return "\n\n".join(results)
 
 
-# ── Email HTML ────────────────────────────────────────────────────────────────
+def compile_brief(raw: str) -> dict:
+    groq   = Groq(api_key=GROQ_API_KEY)
+    today  = datetime.now(CST).strftime("%B %d, %Y")
+    prompt = BRIEF_PROMPT.format(today=today, search_results=raw)
+    print("  Compiling with Groq...")
+    resp = groq.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=3500,
+    )
+    raw_text = resp.choices[0].message.content
+    clean = re.sub(r"```(?:json)?|```", "", raw_text).strip()
+    m = re.search(r"\{.*\}", clean, re.DOTALL)
+    if not m:
+        raise ValueError(f"No JSON in response:\n{raw_text[:400]}")
+    return json.loads(m.group())
 
-LABEL_COLORS = {
-    "Platform":           "#1877F2",
-    "Measurement":        "#059669",
-    "Creative":           "#7C3AED",
-    "Research":           "#D97706",
-    "Brand/Category":     "#DC2626",
-    "AI/Automation":      "#0891B2",
-    "Creator/Influencer": "#BE185D",
-    "Media/Ad Tech":      "#4F46E5",
-    "Other":              "#4B5563",
+
+# ── Email HTML ────────────────────────────────────────────────────────────────
+CAT_COLORS = {
+    "Platform Change": "#1877F2",
+    "Measurement":     "#059669",
+    "Creative":        "#7C3AED",
+    "Competitor":      "#DC2626",
+    "Research":        "#D97706",
+    "AI/Automation":   "#0891B2",
+    "Buyer Behavior":  "#0A66C2",
 }
 DEF_COLOR = "#4B5563"
 
 
-def item_html(item: dict, idx: int) -> str:
-    label = item.get("label", "Other")
-    color = LABEL_COLORS.get(label, DEF_COLOR)
-
-    title = esc(item.get("title", ""))
-    src = esc(item.get("source_name", "Source"))
-    url = esc(clean_url(item.get("source_url", "#")))
-    date = esc(item.get("date", ""))
-    note = esc(item.get("note", ""))
-
+def signal_html(s: dict, idx: int) -> str:
+    cat   = s.get("category", "Update")
+    color = CAT_COLORS.get(cat, DEF_COLOR)
+    url   = s.get("source_url", "#")
+    src   = s.get("source_name", "Source")
+    rec   = s.get("recency", "")
     return f"""
 <table width="100%" cellpadding="0" cellspacing="0" border="0"
        style="background:#ffffff;border-radius:10px;margin-bottom:18px;
               border-left:4px solid {color};box-shadow:0 1px 4px rgba(0,0,0,.06);">
-  <tr>
-    <td style="padding:20px 24px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0">
-        <tr>
-          <td>
-            <span style="background:{color};color:#fff;font-size:10px;font-weight:700;
-                 letter-spacing:.7px;padding:2px 9px;border-radius:20px;text-transform:uppercase;">
-              {esc(label)}
-            </span>
-          </td>
-          <td align="right">
-            <span style="font-size:11px;color:#9CA3AF;">{date}</span>
-          </td>
-        </tr>
-      </table>
-
-      <h3 style="margin:11px 0 9px;font-size:15.5px;font-weight:750;color:#111827;line-height:1.4;">
-        {idx}. {title}
-      </h3>
-
-      <p style="margin:0 0 13px;font-size:13.8px;color:#374151;line-height:1.75;">
-        {note}
-      </p>
-
-      <a href="{url}" style="font-size:12.5px;color:{color};text-decoration:none;font-weight:600;">
-        {src} →
-      </a>
-    </td>
-  </tr>
+  <tr><td style="padding:20px 24px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td><span style="background:{color};color:#fff;font-size:10px;font-weight:700;
+               letter-spacing:.7px;padding:2px 9px;border-radius:20px;text-transform:uppercase;">{cat}</span></td>
+      <td align="right"><span style="font-size:11px;color:#9CA3AF;">{rec}</span></td>
+    </tr></table>
+    <h3 style="margin:10px 0 8px;font-size:15px;font-weight:700;color:#111827;line-height:1.4;">
+      Signal {idx}: {s.get('title','')}
+    </h3>
+    <p style="margin:0 0 10px;font-size:13.5px;color:#374151;line-height:1.75;">
+      <strong>Why it matters:</strong> {s.get('why_it_matters','')}
+    </p>
+    <div style="background:#EFF6FF;border-radius:7px;padding:10px 14px;margin-bottom:12px;">
+      <span style="font-size:11px;font-weight:700;color:#1D4ED8;text-transform:uppercase;letter-spacing:.6px;">Action</span>
+      <p style="margin:4px 0 0;font-size:13px;color:#1E40AF;line-height:1.6;">{s.get('action','')}</p>
+    </div>
+    <a href="{url}" style="font-size:12.5px;color:{color};text-decoration:none;font-weight:600;">
+      {src} →
+    </a>
+  </td></tr>
 </table>"""
 
 
-def links_html(items: list) -> str:
+def bullets_html(items: list, label: str, color: str) -> str:
     if not items:
         return ""
+    lis = "".join(f'<li style="margin-bottom:6px;font-size:13.5px;color:#374151;line-height:1.65;">{i}</li>' for i in items)
+    return f"""
+<div style="margin-bottom:18px;">
+  <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:{color};
+             text-transform:uppercase;letter-spacing:.8px;">{label}</p>
+  <ul style="margin:0;padding-left:18px;">{lis}</ul>
+</div>"""
 
-    rows = ""
 
-    for item in items:
-        if isinstance(item, dict):
-            title = esc(item.get("title", item.get("url", "")))
-            url = esc(clean_url(item.get("url", "#")))
-        else:
-            title = esc(str(item))
-            url = esc(clean_url(str(item)))
-
-        rows += (
-            f'<tr><td style="padding:4px 0;">'
-            f'<a href="{url}" style="font-size:13px;color:#4F46E5;text-decoration:none;word-break:break-all;">'
-            f'{title}</a></td></tr>'
-        )
-
+def links_html(urls: list) -> str:
+    if not urls:
+        return ""
+    rows = "".join(
+        f'<tr><td style="padding:4px 0;"><a href="{u}" style="font-size:13px;color:#4F46E5;'
+        f'text-decoration:none;word-break:break-all;">{u}</a></td></tr>'
+        for u in urls
+    )
     return f"""
 <div style="margin-bottom:18px;">
   <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#6B7280;
-             text-transform:uppercase;letter-spacing:.8px;">Links</p>
+             text-transform:uppercase;letter-spacing:.8px;">Best Links to Read</p>
   <table cellpadding="0" cellspacing="0" border="0">{rows}</table>
 </div>"""
 
@@ -427,183 +211,100 @@ def build_brief_html(data: dict) -> str:
     now      = datetime.now(CST)
     date_str = now.strftime("%B %d, %Y")
     week_num = now.isocalendar()[1]
-    n        = len(data.get("items", []))
+    n        = len(data.get("signals", []))
 
-    headline = esc(data.get("headline", "Paid Social Edge"))
-    intro = esc(data.get("intro", ""))
-
-    items_html = "\n".join(
-        item_html(item, i + 1)
-        for i, item in enumerate(data.get("items", []))
+    exec_sum = data.get("executive_summary", [])
+    exec_html = "".join(
+        f'<li style="margin-bottom:7px;font-size:14px;color:#C7D2FE;line-height:1.7;">{b}</li>'
+        for b in exec_sum
     )
 
-    links_section = links_html(data.get("links", []))
+    signals_html = "\n".join(signal_html(s, i+1) for i, s in enumerate(data.get("signals", [])))
+    act_html     = bullets_html(data.get("act_on", []),   "What I would act on",  "#059669")
+    mon_html     = bullets_html(data.get("monitor", []),  "What I would monitor", "#D97706")
+    lnk_html     = links_html(data.get("best_links", []))
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Paid Social Edge Brief — {esc(date_str)}</title>
-</head>
-
-<body style="margin:0;padding:0;background:#F3F4F6;" bgcolor="#F3F4F6">
-<table width="100%" bgcolor="#F3F4F6" style="background:#F3F4F6;
+    return f"""<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Paid Social Edge Brief — {date_str}</title></head>
+<body style="margin:0;padding:0;background:#F3F4F6;
              font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-<tr>
-<td align="center" style="padding:32px 16px;">
-<table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;">
+<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px;">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
 
-  <tr>
-    <td style="background:#1E1B4B;border-radius:12px 12px 0 0;padding:32px 36px 28px;"
-        bgcolor="#1E1B4B">
-      <p style="margin:0 0 5px;font-size:10px;font-weight:700;letter-spacing:2.5px;
-                 color:#818CF8;text-transform:uppercase;">
-        Update Brief &nbsp;·&nbsp; Week {week_num} &nbsp;·&nbsp; {esc(date_str)} &nbsp;·&nbsp; {n} items
-      </p>
+  <!-- Header -->
+  <tr><td style="background:linear-gradient(135deg,#0F172A 0%,#1E1B4B 60%,#312E81 100%);
+                  border-radius:12px 12px 0 0;padding:32px 36px 28px;">
+    <p style="margin:0 0 5px;font-size:10px;font-weight:700;letter-spacing:2.5px;
+               color:#818CF8;text-transform:uppercase;">
+      Biweekly Brief &nbsp;·&nbsp; Week {week_num} &nbsp;·&nbsp; {date_str} &nbsp;·&nbsp; {n} signals
+    </p>
+    <h1 style="margin:0 0 16px;font-size:26px;font-weight:800;color:#fff;letter-spacing:-.3px;">
+      Paid Social Edge
+    </h1>
+    <p style="margin:0 0 6px;font-size:10px;font-weight:700;color:#6366F1;
+               text-transform:uppercase;letter-spacing:1px;">This Cycle</p>
+    <ul style="margin:0;padding-left:16px;">{exec_html}</ul>
+  </td></tr>
+  <tr><td style="background:#4F46E5;height:3px;"></td></tr>
 
-      <h1 style="margin:0 0 12px;font-size:25px;font-weight:800;color:#fff;letter-spacing:-.3px;">
-        {headline}
-      </h1>
+  <!-- Signals -->
+  <tr><td style="background:#F3F4F6;padding:24px 16px 4px;">
+    {signals_html}
+  </td></tr>
 
-      <p style="margin:0;font-size:14px;color:#C7D2FE;line-height:1.7;">
-        {intro}
-      </p>
-    </td>
-  </tr>
+  <!-- Act / Monitor / Links -->
+  <tr><td style="background:#ffffff;border-radius:0;padding:20px 24px;">
+    {act_html}
+    {mon_html}
+    {lnk_html}
+  </td></tr>
 
-  <tr>
-    <td style="background:#4F46E5;height:3px;"></td>
-  </tr>
+  <!-- Footer -->
+  <tr><td style="background:#111827;border-radius:0 0 12px 12px;padding:20px 36px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#6B7280;line-height:1.6;">
+      Paid Social Edge &nbsp;·&nbsp; Biweekly paid social intelligence brief &nbsp;·&nbsp;
+      Research via Tavily + Llama 3.3
+    </p>
+  </td></tr>
 
-  <tr>
-    <td style="background:#F3F4F6;padding:24px 16px 4px;">
-      {items_html}
-    </td>
-  </tr>
-
-  <tr>
-    <td style="background:#ffffff;border-radius:0;padding:20px 24px;">
-      {links_section}
-    </td>
-  </tr>
-
-  <tr>
-    <td style="background:#111827;border-radius:0 0 12px 12px;padding:20px 36px;text-align:center;" bgcolor="#111827">
-      <p style="margin:0;font-size:12px;color:#6B7280;line-height:1.6;">
-        Paid Social Edge &nbsp;·&nbsp; Recent updates worth knowing
-      </p>
-    </td>
-  </tr>
-
-</table>
-</td>
-</tr>
-</table>
-</body>
-</html>"""
+</table></td></tr></table></body></html>"""
 
 
 # ── Send ──────────────────────────────────────────────────────────────────────
-
 def send(html: str, subject: str):
     resend.api_key = RESEND_API_KEY
-
     with open(SUBSCRIBERS_FILE) as f:
         subs = json.load(f)
-
     emails = subs.get("emails", [])
-
     if not emails:
-        print("No subscribers.")
-        return
-
-    sent = 0
-    failed = 0
-
+        print("No subscribers."); return
+    sent = failed = 0
     for email in emails:
         try:
-            resend.Emails.send({
-                "from": f"{FROM_NAME} <{FROM_EMAIL}>",
-                "to": email,
-                "subject": subject,
-                "html": html
-            })
-
-            print(f"  Sent: {email}")
-            sent += 1
-            time.sleep(0.2)
-
+            resend.Emails.send({"from": f"{FROM_NAME} <{FROM_EMAIL}>",
+                                "to": email, "subject": subject, "html": html})
+            print(f"  Sent: {email}"); sent += 1; time.sleep(0.2)
         except Exception as e:
-            print(f"  Failed: {email} — {e}")
-            failed += 1
-
+            print(f"  Failed: {email} — {e}"); failed += 1
     print(f"Done. {sent} sent / {failed} failed.")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-
 def main():
     if not should_run_today():
         return
 
-    today = datetime.now(CST).strftime("%B %d, %Y")
+    print("Running biweekly brief searches...")
+    raw    = run_searches()
+    data   = compile_brief(raw)
+    n      = len(data.get("signals", []))
+    print(f"Compiled {n} signals.")
 
-    print("\n[Phase 1] Generating search queries...")
-
-    try:
-        query_data = call_groq_json(
-            prompt=build_query_prompt(today),
-            required_keys=["queries"],
-            step_name="Query generation",
-            max_tokens=800,
-            temperature=0.45
-        )
-
-        queries = query_data.get("queries", [])
-
-        if not isinstance(queries, list) or not queries:
-            raise ValueError("queries must be a non-empty list")
-
-    except Exception as e:
-        print(f"Query generation failed, using fallback queries. Error: {e}")
-        queries = fallback_queries()
-
-    print("\nSearch queries:")
-    for q in queries:
-        print(f"  - {q}")
-
-    print("\n[Phase 2] Running searches...")
-    raw = run_searches(queries)
-
-    if not raw.strip():
-        raise RuntimeError("No search results returned from Tavily.")
-
-    print("\n[Phase 3] Compiling update brief...")
-
-    data = call_groq_json(
-        prompt=build_brief_prompt(today, raw[:9000]),
-        required_keys=[
-            "period",
-            "headline",
-            "intro",
-            "items",
-            "links"
-        ],
-        step_name="Brief compilation",
-        max_tokens=2200,
-        temperature=0.25,
-        repair_context=raw[:2500]
-    )
-
-    n = len(data.get("items", []))
-    print(f"Compiled {n} items.")
-
-    html = build_brief_html(data)
-    week_no = datetime.now(CST).isocalendar()[1]
-    subject = f"Paid Social Edge — {n} updates | Wk {week_no}"
-    subject = compact_text(subject, 70)
-
+    html     = build_brief_html(data)
+    week_no  = datetime.now(CST).isocalendar()[1]
+    # Short subject line: under 60 chars
+    subject  = f"Paid Social Edge — {n} signals | Wk {week_no}"
     print(f"Subject: {subject}")
     send(html, subject)
 
