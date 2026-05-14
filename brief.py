@@ -47,7 +47,7 @@ SEARCH_QUERIES = [
 # ── Prompt ────────────────────────────────────────────────────────────────────
 BRIEF_PROMPT = """Today is {today}. You are a senior paid social operator building an intelligence brief for yourself.
 
-Context: This brief is for paid social operators working across B2B tech, consumer tech, gaming, enterprise hardware, AI, media buying, creative testing, and paid social measurement.
+Context: This brief is for paid social operators working across B2B tech, consumer tech, gaming, enterprise hardware, AI, media buying, influencer ads, creative testing, and paid social measurement.
 
 You are NOT writing a generic newsletter. You are filtering raw search results to find only signals that genuinely matter for paid social strategy, creative, measurement, platform changes, buyer behavior, or competitive/category positioning.
 
@@ -61,7 +61,7 @@ A strong signal is one that:
 - Changes how a paid social operator might think about campaign structure, platform behavior, creative, or measurement
 - Reveals something meaningful about platform mechanics, buyer behavior, media buying, or competitor/category activity
 - Contains actual data, a real case, a specific platform change, or a credible research finding — not generic opinion or tips
-- Is relevant to paid social operators working across platforms like Meta, LinkedIn, Google/YouTube, Reddit, TikTok, X, or similar channels
+- Is relevant to paid social operators working across platforms like Meta, LinkedIn, Reddit, TikTok, X, or similar channels
 
 HARD FILTER. Exclude anything that is:
 - old, the source was posted or written on a date older than 30 days ago
