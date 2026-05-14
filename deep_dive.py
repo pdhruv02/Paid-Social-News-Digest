@@ -193,14 +193,13 @@ The goal is not to find generic best practices.
 The goal is to find a source with enough real detail to write a useful short case note.
 
 Look for examples with concrete mechanics:
-platform, format, audience, creative, hook, targeting, bidding, budget logic,
+platform, format, audience, creative, hook, targeting, bidding, budget logic, stratechery,
 creator/influencer distribution, landing page, funnel role, experiment design,
 measurement, lift study, attribution, results, or campaign architecture.
 
 Prioritize sources likely to contain actual case detail:
-official platform success stories, Effie/WARC/IPA cases, Think with Google,
-YouTube Works, LinkedIn/Reddit/Meta/TikTok business case studies, IAB,
-Marketing Examples, Exit Five, AdExchanger, Digiday, agency writeups,
+official platform success stories, Effie/WARC/IPA cases, LinkedIn/Reddit/Meta/TikTok business case studies, IAB,
+Marketing Examples, Exit Five, AdExchanger, Digiday, agency writeups, 
 public campaign pages, ad-library/creative teardowns, and practitioner breakdowns.
 
 These are examples, not a required list.
