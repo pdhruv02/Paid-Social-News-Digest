@@ -1,18 +1,21 @@
 """
 Paid Social Edge — Paid Social Case / Ad Curator Newsletter
 
-What this version is optimized for:
-- Good campaigns, ads, case studies, platform examples, and teardowns
-- Paid social mechanics, not generic brand-purpose stories
-- Useful reads for people who actually work on paid social ads
-- Concrete details: platform, format, audience, creative, media buying, testing, measurement, funnel, offer, or distribution
-- Simple output: title, subtitle, body, main source
+Goal:
+Find one strong paid-social-relevant case, campaign, ad, platform example,
+teardown, or research piece — then write a grounded short article from the
+actual source content.
+
+Key fix:
+The model first creates a SOURCE DIGEST from extracted content.
+The final article can only use that digest, reducing generic repetition,
+unsupported examples, and loose interpretation.
 
 Avoids:
-- Broad emotional advertising stories with no paid social mechanics
-- Generic “marketing can do good” writeups
-- Surface-level awards/case studies
-- Overly templatey sections
+- Generic SEO "best practices" pages
+- Broad emotional brand-purpose essays
+- Repetitive AI-written advice
+- Unsupported examples not present in source material
 """
 
 from tavily import TavilyClient
@@ -82,10 +85,6 @@ def compact_text(text: str, max_chars: int) -> str:
 
 
 def get_json_text(raw: str) -> str:
-    """
-    Groq JSON mode should return valid JSON, but this fallback helps if a model
-    accidentally wraps JSON in markdown or includes surrounding text.
-    """
     if not raw:
         raise ValueError("Empty model output.")
 
@@ -115,13 +114,9 @@ def call_groq_json(
     required_keys: list,
     step_name: str,
     max_tokens: int = 1800,
-    temperature: float = 0.35,
+    temperature: float = 0.30,
     repair_context: str = ""
 ) -> dict:
-    """
-    Calls Groq using JSON Object Mode and validates required keys.
-    If schema validation fails, retries with a stricter repair prompt.
-    """
     groq_client = Groq(api_key=GROQ_API_KEY)
 
     system_message = (
@@ -192,34 +187,29 @@ def build_scout_query_prompt(today: str) -> str:
     return f"""
 Today is {today}.
 
-Create search queries for a newsletter that finds one genuinely useful paid social / advertising example worth studying.
+Create search queries to find one strong paid social / advertising case worth studying.
 
-The goal is not to find a broadly inspiring marketing story.
-The goal is to find something useful for someone who works on paid social ads.
+The goal is not to find generic best practices.
+The goal is to find a source with enough real detail to write a useful short case note.
 
-Look for campaigns, ads, case studies, teardowns, research, or platform examples where there is some real detail about how the advertising worked.
+Look for examples with concrete mechanics:
+platform, format, audience, creative, hook, targeting, bidding, budget logic,
+creator/influencer distribution, landing page, funnel role, experiment design,
+measurement, lift study, attribution, results, or campaign architecture.
 
-Useful details might include:
-- paid social platform used
-- ad format
-- creative approach
-- targeting or audience insight
-- media buying setup
-- testing method
-- measurement approach
-- funnel role
-- offer or landing page
-- influencer/creator distribution
-- performance signal
-- category or competitor messaging pattern
+Prioritize sources likely to contain actual case detail:
+official platform success stories, Effie/WARC/IPA cases, Think with Google,
+YouTube Works, LinkedIn/Reddit/Meta/TikTok business case studies, IAB,
+Marketing Examples, Exit Five, AdExchanger, Digiday, agency writeups,
+public campaign pages, ad-library/creative teardowns, and practitioner breakdowns.
 
-Good sources may include official platform case studies, ad libraries, brand campaign pages, Effie, WARC, IPA, Think with Google, YouTube Works, LinkedIn B2B Institute, Reddit for Business, Meta for Business, TikTok Business, IAB, AdExchanger, Digiday, Marketing Brew, eMarketer, Campaign, The Drum, Marketing Examples, Exit Five, paid social practitioner teardowns, agency writeups, and public campaign pages.
+These are examples, not a required list.
 
-These are examples, not a required source list.
+Avoid queries that mostly return:
+SEO listicles, “best practices,” generic Facebook ad tips, award summaries with no mechanics,
+or emotional brand-purpose stories with no paid media detail.
 
-Avoid queries that will mostly return generic advice, emotional brand-purpose stories, or award pages with no media/creative mechanics.
-
-Return JSON only with this schema:
+Return JSON only:
 {{
   "queries": [
     "query 1",
@@ -243,82 +233,69 @@ def build_find_selection_prompt(today: str, scout_results: str) -> str:
     return f"""
 Today is {today}.
 
-You are curating one paid social / advertising example for a newsletter read by paid social operators.
-
-Your job:
-From the research results below, choose one thing worth writing about.
-
-Do not choose a campaign only because it is emotional, awarded, socially important, or creatively famous.
-Choose it only if it has a useful advertising mechanism that someone in paid social could learn from.
+You are selecting one source for a paid social / advertising case note.
 
 Raw research results:
 {scout_results}
 
-A good pick could be:
-- a paid social case study with real mechanics
-- a campaign with interesting social/ad distribution
-- a creative testing example
-- an ad format or platform example
-- a creator/influencer campaign with clear media logic
-- a B2B paid media example
-- a brand/category campaign with a clear paid social lesson
-- a measurement or attribution example
-- a teardown with specific ads, audiences, hooks, landing pages, or results
-- a platform change that affects how ads are bought, tested, or measured
+Choose one source only if it has enough concrete material to support a useful article.
+
+Prefer:
+- a campaign case study with platform, creative, audience, media, measurement, or result details
+- a paid social teardown with actual ads, hooks, landing pages, or results
+- a platform case study that shows campaign mechanics
+- a creator/influencer campaign with clear paid distribution logic
+- a measurement or testing case with a real setup
+- a B2B or tech paid media example with clear funnel/mechanics
 
 Avoid:
-- broad brand-purpose campaigns with no paid media detail
-- “marketing can do good” stories
-- award summaries with no mechanics
-- generic “this campaign resonated with Gen Z” writing
-- examples where the only lesson is “understand your audience”
-- examples where the article would become emotional but not useful
+- generic “10 examples” or “best practices” posts
+- broad inspirational campaign stories
+- award summaries with no paid media mechanics
+- articles where the only lesson is “understand your audience”
+- sources that require the writer to invent examples or fill gaps
 
-Selection standard:
-A strong find should have at least one concrete paid-media detail: platform, format, audience, creative mechanic, buying/targeting approach, testing approach, measurement signal, funnel role, or campaign architecture.
+Selection test:
+Can the article be written mostly from source facts without adding generic advice?
+If not, pick another source.
 
-If the best emotional/award-winning campaign has no paid social mechanics, do not pick it.
-
-Return JSON only with this schema:
+Return JSON only:
 {{
   "should_publish": true,
-  "find_title": "A short description of the chosen find",
-  "article_angle": "The specific paid social / advertising angle the article should explore",
-  "why_this_is_worth_reading": "Why this is useful for paid social operators, not just generally interesting",
+  "find_title": "Short description of the chosen source/case",
+  "article_angle": "Specific angle grounded in the source",
+  "why_this_is_worth_reading": "Why this is useful for paid social/ad operators",
   "main_source_title": "Best main source title",
   "main_source_url": "Best main source URL",
   "main_source_type": "Case study | Article | Research report | Campaign page | Teardown | Platform source | Other",
   "source_strength": "Strong | Medium | Thin",
-  "paid_media_detail": "The concrete paid social, media buying, creative, targeting, testing, or measurement detail that makes this worth studying",
-  "what_to_avoid": "What would make the article boring, emotional-only, or generic",
+  "source_has_mechanics": true,
+  "mechanics_found": [
+    "specific mechanic/detail 1 from the search result",
+    "specific mechanic/detail 2 from the search result",
+    "specific mechanic/detail 3 from the search result"
+  ],
+  "what_to_avoid": "What would make the article generic or unsupported",
   "followup_queries": [
-    "5 to 8 search queries to deepen this exact paid social/ad mechanics angle"
+    "5 to 8 queries to deepen this exact source/campaign/mechanic"
   ]
 }}
 """
 
 
-def build_article_prompt(
+def build_source_digest_prompt(
     today: str,
     find_title: str,
     article_angle: str,
-    why_worth_reading: str,
     main_source_title: str,
     main_source_url: str,
-    source_strength: str,
-    paid_media_detail: str,
-    what_to_avoid: str,
     extracted_main_source: str,
-    deep_results: str,
-    scout_results: str
+    deep_results: str
 ) -> str:
     return f"""
 Today is {today}.
 
-Write one article-style email for a paid social / advertising newsletter.
-
-This should not feel like a template.
-There should be no fixed sections like "operator lessons," "what to test," "practical implications," or "key takeaways."
+Create a grounded evidence digest for a paid social / advertising case note.
 
 Chosen find:
 {find_title}
@@ -326,109 +303,116 @@ Chosen find:
 Article angle:
 {article_angle}
 
-Why this is worth reading:
-{why_worth_reading}
-
 Main source:
 {main_source_title}
 {main_source_url}
 
-Source strength:
-{source_strength}
-
-Concrete paid-media detail to anchor the article:
-{paid_media_detail}
-
-What to avoid:
-{what_to_avoid}
-
 Extracted main source content:
 {extracted_main_source}
 
-Deep research results:
+Supporting research:
 {deep_results}
 
-Earlier scout results:
-{scout_results}
+Your job:
+Extract only the concrete information that is actually present in the sources.
+Do not interpret broadly.
+Do not invent examples.
+Do not add generic marketing advice.
+Do not include anything unless it is supported by the source text.
 
-Private reader context:
-- The reader works in paid social.
-- They care about ads, campaigns, creative, platforms, buying, targeting, testing, measurement, buyer behavior, and useful advertising examples.
-- Do not make the article company-specific.
+Return JSON only:
+{{
+  "case_name": "Name of campaign, source, company, or example",
+  "source_quality": "Strong | Medium | Thin",
+  "one_sentence_case": "One sentence on what the case/source is actually about.",
+  "concrete_facts": [
+    "Specific fact from source",
+    "Specific fact from source",
+    "Specific fact from source",
+    "Specific fact from source"
+  ],
+  "paid_media_mechanics": [
+    "Platform/format/audience/creative/testing/measurement/media detail from source",
+    "Another concrete mechanic from source"
+  ],
+  "interesting_tension": "The useful tension or non-obvious point, only if supported by evidence.",
+  "what_can_be_learned": "A careful, source-grounded lesson. No generic advice.",
+  "what_not_to_claim": [
+    "Unsupported or overbroad claim to avoid",
+    "Another claim to avoid"
+  ],
+  "best_source_title": "{main_source_title}",
+  "best_source_url": "{main_source_url}",
+  "source_note": "How to read this source carefully."
+}}
+"""
 
-Write like:
-"I found this useful advertising example. Here is what happened, what makes the campaign/ad interesting, and what it quietly teaches about paid social."
 
-Tone:
-- smart
-- plainspoken
-- specific
-- useful
-- not corporate
-- not emotional for the sake of being emotional
-- not generic
+def build_article_prompt(today: str, digest: dict) -> str:
+    digest_text = json.dumps(digest, ensure_ascii=False, indent=2)
 
-Hard rules:
-- Do not write a general brand-purpose essay.
-- Do not make the core lesson “marketing can do good.”
-- Do not write generic lines like “this improves ROI,” “testing is important,” “brands need to understand audiences,” or “creative is key.”
-- Do not repeat the same takeaway in different words.
-- Do not force advice.
-- Do not include bullet points unless the article genuinely needs them.
-- The body should be 500 to 850 words.
-- Use paragraphs.
-- Include concrete details from sources.
-- If the evidence is thin, be honest and write a shorter article.
-- Do not invent facts.
-- If the main source is promotional, say how to read it carefully.
-- End naturally. Do not add a forced conclusion section.
+    return f"""
+Today is {today}.
 
-Return JSON only with this schema:
+Write one short article-style email for a paid social / advertising newsletter.
+
+Use ONLY this grounded evidence digest:
+{digest_text}
+
+This should read like a useful case note, not a generic advice article.
+
+Rules:
+- Follow the digest closely.
+- Do not add examples that are not in the digest.
+- Do not invent brands, results, campaigns, or platform details.
+- Do not repeat the same idea in different words.
+- Do not write generic lines like “creative is key,” “testing is important,”
+  “this improves ROI,” or “brands need to understand their audience.”
+- Do not turn this into an emotional brand-purpose essay.
+- If the digest is thin, write a shorter article and be honest.
+- Body should be 450 to 750 words.
+- Use natural paragraphs.
+- Every paragraph should add a new piece of information or interpretation.
+- The writing should be specific, plainspoken, and useful for someone who works on paid social ads.
+
+Return JSON only:
 {{
   "subject_line": "Email subject line under 70 characters",
   "title": "Article title",
   "subtitle": "One-sentence subtitle",
-  "body": "Full article body with paragraphs separated by blank lines. No markdown headings unless truly needed.",
-  "main_source_title": "{main_source_title}",
-  "main_source_url": "{main_source_url}",
+  "body": "Full article body with paragraphs separated by blank lines.",
+  "main_source_title": "Main source title",
+  "main_source_url": "Main source URL",
   "source_note": "One sentence on why this source is worth reading or how to read it carefully."
 }}
 """
 
 
-def build_refinement_prompt(draft_json: dict, evidence: str) -> str:
+def build_refinement_prompt(draft_json: dict, digest: dict) -> str:
     draft_text = json.dumps(draft_json, ensure_ascii=False, indent=2)
+    digest_text = json.dumps(digest, ensure_ascii=False, indent=2)
 
     return f"""
-Edit this paid social / advertising newsletter article.
-
-Reviewer feedback to solve:
-- The article should be useful for someone in paid social ads.
-- It should not become an emotional brand-purpose essay.
-- It should not sound like generic marketing advice.
-- It should include concrete campaign, ad, platform, creative, media buying, targeting, testing, or measurement details.
-- It should feel like one useful paid social / advertising read, not a broad inspiration story.
+Edit this article to make it tighter and less repetitive.
 
 Draft JSON:
 {draft_text}
 
-Evidence available:
-{evidence}
+Evidence digest:
+{digest_text}
 
 Rules:
 1. Keep the exact same JSON schema.
-2. Remove generic lines.
-3. Make the article more specific and useful for paid social operators.
-4. Every paragraph should add something new.
-5. Use concrete details from the evidence where possible.
-6. Do not add unsupported facts.
-7. Do not use corporate phrases like "leverage," "unlock," "drive ROI," "must prioritize," or "deep understanding."
-8. Do not make it company-specific.
-9. Keep body between 500 and 850 words unless the evidence is thin.
-10. Keep the tone natural and readable.
-11. If the draft is mainly emotional or brand-purpose driven, rewrite it around the paid media / creative / platform / measurement mechanism instead.
+2. Use only information supported by the digest.
+3. Remove repetition.
+4. Remove generic marketing advice.
+5. Remove unsupported examples.
+6. Keep it useful for someone in paid social ads.
+7. Make every paragraph add something new.
+8. Do not use corporate phrases like "leverage," "unlock," "drive ROI," "must prioritize," or "deep understanding."
+9. Keep body between 450 and 750 words unless evidence is thin.
 
-Return JSON only with this schema:
+Return JSON only:
 {{
   "subject_line": "Email subject line under 70 characters",
   "title": "Article title",
@@ -535,7 +519,7 @@ def extract_url_content(url: str, query: str = "") -> str:
             return ""
 
         raw = results[0].get("raw_content", "")
-        return compact_text(raw, 7000)
+        return compact_text(raw, 8000)
 
     except Exception as e:
         print(f"  Tavily extract failed for {url}: {e}")
@@ -730,7 +714,7 @@ def main():
             required_keys=["queries"],
             step_name="Scout query generation",
             max_tokens=1200,
-            temperature=0.55
+            temperature=0.50
         )
 
         scout_queries = scout_data.get("queries", [])
@@ -757,7 +741,7 @@ def main():
     if not scout_results.strip():
         raise RuntimeError("No search results returned from Tavily.")
 
-    print("\n[Phase 3] Selecting one paid-social-relevant find...")
+    print("\n[Phase 3] Selecting one grounded case/source...")
     time.sleep(3)
 
     selection_prompt = build_find_selection_prompt(
@@ -774,13 +758,14 @@ def main():
             "main_source_title",
             "main_source_url",
             "source_strength",
-            "paid_media_detail",
+            "source_has_mechanics",
+            "mechanics_found",
             "what_to_avoid",
             "followup_queries"
         ],
         step_name="Find selection",
         max_tokens=1800,
-        temperature=0.25,
+        temperature=0.20,
         repair_context=scout_results[:4000]
     )
 
@@ -790,7 +775,6 @@ def main():
     main_source_title = selection.get("main_source_title", "")
     main_source_url = clean_url(selection.get("main_source_url", ""))
     source_strength = selection.get("source_strength", "")
-    paid_media_detail = selection.get("paid_media_detail", "")
     what_to_avoid = selection.get("what_to_avoid", "")
     followup_queries = selection.get("followup_queries", [])
 
@@ -801,7 +785,6 @@ def main():
     print(f"Angle: {article_angle}")
     print(f"Main source: {main_source_title} — {main_source_url}")
     print(f"Source strength: {source_strength}")
-    print(f"Paid media detail: {paid_media_detail}")
     print(f"Avoid: {what_to_avoid}")
 
     print("\n[Phase 4] Extracting main source content...")
@@ -810,7 +793,7 @@ def main():
         query=article_angle or find_title
     )
 
-    print("\n[Phase 5] Deepening the find with search...")
+    print("\n[Phase 5] Deepening source with search...")
     time.sleep(3)
 
     deep_results = search_batch(
@@ -825,23 +808,44 @@ def main():
         print("No deep results returned. Falling back to scout results.")
         deep_results = scout_results
 
-    print("\n[Phase 6] Writing article...")
-    time.sleep(5)
+    print("\n[Phase 6] Creating source digest...")
+    time.sleep(3)
 
-    article_prompt = build_article_prompt(
+    digest_prompt = build_source_digest_prompt(
         today=today,
         find_title=find_title,
         article_angle=article_angle,
-        why_worth_reading=why_worth_reading,
         main_source_title=main_source_title,
         main_source_url=main_source_url,
-        source_strength=source_strength,
-        paid_media_detail=paid_media_detail,
-        what_to_avoid=what_to_avoid,
-        extracted_main_source=extracted_main_source[:7000],
-        deep_results=deep_results[:12000],
-        scout_results=scout_results[:3000]
+        extracted_main_source=extracted_main_source[:8000],
+        deep_results=deep_results[:10000]
     )
+
+    digest = call_groq_json(
+        prompt=digest_prompt,
+        required_keys=[
+            "case_name",
+            "source_quality",
+            "one_sentence_case",
+            "concrete_facts",
+            "paid_media_mechanics",
+            "interesting_tension",
+            "what_can_be_learned",
+            "what_not_to_claim",
+            "best_source_title",
+            "best_source_url",
+            "source_note"
+        ],
+        step_name="Source digest",
+        max_tokens=2200,
+        temperature=0.15,
+        repair_context=(extracted_main_source + "\n\n" + deep_results)[:5000]
+    )
+
+    print("\n[Phase 7] Writing article from digest...")
+    time.sleep(3)
+
+    article_prompt = build_article_prompt(today=today, digest=digest)
 
     draft = call_groq_json(
         prompt=article_prompt,
@@ -855,17 +859,17 @@ def main():
             "source_note"
         ],
         step_name="Article writing",
-        max_tokens=3000,
-        temperature=0.30,
-        repair_context=(extracted_main_source + "\n\n" + deep_results)[:5000]
+        max_tokens=2600,
+        temperature=0.25,
+        repair_context=json.dumps(digest, ensure_ascii=False)[:4000]
     )
 
-    print("\n[Phase 7] Refining article...")
+    print("\n[Phase 8] Refining article against digest...")
     time.sleep(3)
 
     refinement_prompt = build_refinement_prompt(
         draft_json=draft,
-        evidence=(extracted_main_source + "\n\n" + deep_results)[:13000]
+        digest=digest
     )
 
     data = call_groq_json(
@@ -880,9 +884,9 @@ def main():
             "source_note"
         ],
         step_name="Article refinement",
-        max_tokens=3000,
-        temperature=0.22,
-        repair_context=(extracted_main_source + "\n\n" + deep_results)[:4000]
+        max_tokens=2600,
+        temperature=0.18,
+        repair_context=json.dumps(digest, ensure_ascii=False)[:4000]
     )
 
     subject = data.get("subject_line") or f"Paid Social Edge: {data.get('title', find_title)}"
@@ -891,7 +895,7 @@ def main():
     html = build_html(data)
 
     print(f"\nSubject: {subject}")
-    print("[Phase 8] Sending email...")
+    print("[Phase 9] Sending email...")
     send_email(html, subject)
 
 
